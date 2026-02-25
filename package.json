@@ -1,0 +1,30 @@
+{
+  "name": "lwsync",
+  "version": "1.0.0",
+  "description": "Bidirectional sync between Linkwarden and browser bookmarks",
+  "license": "MIT",
+  "author": "WombatFromHell",
+  "scripts": {
+    "lint": "bunx eslint --fix ./src ./tests",
+    "format": "bunx prettier -w ./src ./tests",
+    "quality": "bun run lint && bun run format",
+    "build": "bun run quality && bun run scripts/build.ts",
+    "build:prod": "rm -rf dist/ && bun run scripts/build-prod.ts",
+    "dev": "bun run scripts/build.ts --watch",
+    "zip": "bun run scripts/zip.ts",
+    "verify": "bun run scripts/verify.ts",
+    "package": "bun run build && bun run zip",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.0.2",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^17.3.0",
+    "prettier": "^3.8.1",
+    "typescript-eslint": "^8.56.1"
+  },
+  "dependencies": {
+    "preact": "^10.28.4"
+  }
+}

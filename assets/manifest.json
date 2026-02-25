@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "LWSync",
+  "version": "1.0.0",
+  "description": "Bidirectional sync between Linkwarden and browser bookmarks",
+  "permissions": [
+    "bookmarks",
+    "storage",
+    "unlimitedStorage",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "LWSync Settings",
+    "default_icon": {
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "128": "icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.css"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ]
+}
