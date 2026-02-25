@@ -3,8 +3,8 @@
  * Provides a simple key-value interface for sync state, mappings, and pending changes
  */
 
-import { createLogger } from "./logger";
-import { getDefaultCollectionName } from "./browser";
+import { createLogger } from "../utils/logger";
+import { getDefaultCollectionName } from "../browser";
 import type {
   SyncMetadata,
   Mapping,
@@ -12,7 +12,7 @@ import type {
   LogEntry,
   Settings,
   StorageData,
-} from "./types/storage";
+} from "../types/storage";
 export type {
   SyncMetadata,
   Mapping,
@@ -20,7 +20,7 @@ export type {
   LogEntry,
   Settings,
   StorageData,
-} from "./types/storage";
+} from "../types/storage";
 
 const logger = createLogger("LWSync storage");
 

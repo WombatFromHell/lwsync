@@ -7,7 +7,8 @@ import { LinkwardenAPI } from "./api";
 import { SyncEngine } from "./sync";
 import * as storage from "./storage";
 import * as bookmarks from "./bookmarks";
-import { createLogger } from "./logger";
+import { createLogger } from "./utils/logger";
+import { generateId, now } from "./utils/id";
 import { getDefaultCollectionName } from "./browser";
 import type {
   ChromeMessage,
@@ -150,7 +151,7 @@ function setupBookmarkListeners(): void {
 
     // Queue as pending change
     await storage.addPendingChange({
-      id: crypto.randomUUID(),
+      id: generateId(),
       type: "create",
       source: "browser",
       browserId: id,
@@ -159,7 +160,7 @@ function setupBookmarkListeners(): void {
         title: node.title,
         url: node.url,
       },
-      timestamp: Date.now(),
+      timestamp: now(),
       resolved: false,
     });
   });
@@ -173,7 +174,7 @@ function setupBookmarkListeners(): void {
 
     // Queue as pending change
     await storage.addPendingChange({
-      id: crypto.randomUUID(),
+      id: generateId(),
       type: "update",
       source: "browser",
       linkwardenId: mapping?.linkwardenId,
@@ -182,7 +183,7 @@ function setupBookmarkListeners(): void {
         title: changes.title,
         url: changes.url,
       },
-      timestamp: Date.now(),
+      timestamp: now(),
       resolved: false,
     });
   });
@@ -197,12 +198,12 @@ function setupBookmarkListeners(): void {
     const mapping = await storage.getMappingByBrowserId(id);
     if (mapping) {
       await storage.addPendingChange({
-        id: crypto.randomUUID(),
+        id: generateId(),
         type: "delete",
         source: "browser",
         linkwardenId: mapping.linkwardenId,
         browserId: id,
-        timestamp: Date.now(),
+        timestamp: now(),
         resolved: false,
       });
     }
@@ -230,7 +231,7 @@ function setupBookmarkListeners(): void {
 
     // Queue as pending change with full context
     await storage.addPendingChange({
-      id: crypto.randomUUID(),
+      id: generateId(),
       type: "move",
       source: "browser",
       linkwardenId: mapping.linkwardenId,
@@ -240,7 +241,7 @@ function setupBookmarkListeners(): void {
         title: node?.title,
         url: node?.url,
       },
-      timestamp: Date.now(),
+      timestamp: now(),
       resolved: false,
     });
   });

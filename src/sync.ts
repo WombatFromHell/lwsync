@@ -8,16 +8,21 @@ import type { LinkwardenCollection, LinkwardenLink } from "./types/api";
 import type { Mapping, PendingChange, SyncMetadata } from "./types/storage";
 import type { BookmarkNode } from "./types/bookmarks";
 import type {
+  SyncResult,
   ConflictResult,
   MoveToken,
-  SyncResult,
   ChecksumItem,
 } from "./types/sync";
+import { parseFolderPath as parsePath } from "./utils/path";
+import { createLogger } from "./utils/logger";
+import { now } from "./utils/id";
 import * as storage from "./storage";
 import * as bookmarks from "./bookmarks";
-import { createLogger } from "./logger";
 
 const logger = createLogger("LWSync");
+
+// Re-export for backward compatibility with tests
+export { parseFolderPath } from "./utils/path";
 
 /**
  * Compute checksum for a Linkwarden item (for change detection)
@@ -47,7 +52,7 @@ export function appendMoveToken(
   description: string | undefined,
   parentId: number
 ): string {
-  const token: MoveToken = { to: parentId, ts: Date.now() };
+  const token: MoveToken = { to: parentId, ts: now() };
   const tokenStr = `${MOVE_TOKEN_PREFIX}${JSON.stringify(token)}${MOVE_TOKEN_SUFFIX}`;
   if (!description) return tokenStr;
   return `${description} ${tokenStr}`;
@@ -226,13 +231,8 @@ export async function findFolderByPath(
  * Parse a folder path string into an array of folder names
  * Supports Unix-style paths with / delimiter
  * E.g., "Bookmarks Menu/Linkwarden" -> ["Bookmarks Menu", "Linkwarden"]
+ * Re-exported from utils/path for backward compatibility
  */
-export function parseFolderPath(path: string): string[] {
-  return path
-    .split("/")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
-}
 
 /**
  * Find or create a nested folder structure based on path parts
@@ -1389,7 +1389,7 @@ export class SyncEngine {
       // If browserFolderName is empty, use the root folder directly
       let targetFolderId = browserRootFolderId;
       if (browserFolderName && browserFolderName.trim()) {
-        const pathParts = parseFolderPath(browserFolderName);
+        const pathParts = parsePath(browserFolderName);
         targetFolderId = await findOrCreateNestedFolder(
           pathParts,
           browserRootFolderId
@@ -1429,7 +1429,7 @@ export class SyncEngine {
   ): Promise<{ id: number; name: string } | null> {
     try {
       // Parse the name as a path to support nested collections
-      const pathParts = parseFolderPath(name);
+      const pathParts = parsePath(name);
 
       if (pathParts.length === 0) {
         return null;

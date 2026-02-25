@@ -3,6 +3,8 @@
  * Provides a Promise-based interface for chrome.bookmarks
  */
 
+import { computeChecksum as computeStringChecksum } from "./utils/hash";
+import { generateId, now } from "./utils/id";
 import type { Mapping } from "./types/storage";
 import type { BookmarkNode } from "./types/bookmarks";
 import { detectBrowser } from "./browser";
@@ -217,14 +219,7 @@ export function isFolder(node: BookmarkNode): boolean {
  */
 export function computeChecksum(node: BookmarkNode): string {
   const str = `${node.title || ""}|${node.url || ""}`;
-  // Simple hash - good enough for change detection
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash; // Convert to 32-bit integer
-  }
-  return Math.abs(hash).toString(16);
+  return computeStringChecksum(str);
 }
 
 /**
@@ -236,13 +231,13 @@ export function nodeToMapping(
   type: "link" | "collection"
 ): Mapping {
   return {
-    id: crypto.randomUUID(),
+    id: generateId(),
     linkwardenType: type,
     linkwardenId,
     browserId: node.id,
-    linkwardenUpdatedAt: Date.now(),
-    browserUpdatedAt: node.dateGroupModified || node.dateAdded || Date.now(),
-    lastSyncedAt: Date.now(),
+    linkwardenUpdatedAt: now(),
+    browserUpdatedAt: node.dateGroupModified || node.dateAdded || now(),
+    lastSyncedAt: now(),
     checksum: computeChecksum(node),
   };
 }

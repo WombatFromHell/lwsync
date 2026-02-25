@@ -8,19 +8,33 @@
  *   - COLLECTION: Target collection name for sync (case-sensitive)
  */
 
-import { createLogger } from "./logger";
-import type {
-  LinkwardenCollection,
-  LinkwardenLink,
-  LinkwardenError,
-} from "./types/api";
+import { createLogger } from "./utils/logger";
+import { getEnvVar, getEnvVarWithDefault } from "./utils/env";
+import {
+  APIError,
+  AuthError,
+  NotFoundError,
+  ConflictError,
+  RateLimitError,
+  ServerError,
+} from "./api/errors";
+import type { LinkwardenCollection, LinkwardenLink } from "./types/api";
 export type { LinkwardenCollection, LinkwardenLink } from "./types/api";
 
 const logger = createLogger("LWSync API");
 
+/**
+ * Delay for retry logic (exponential backoff)
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class LinkwardenAPI {
   private baseUrl: string;
   private token: string;
+  private readonly maxRetries = 3;
+  private readonly timeout = 30000; // 30 seconds
 
   constructor(serverUrl: string, token: string) {
     // Remove trailing slash if present
@@ -35,37 +49,104 @@ export class LinkwardenAPI {
     };
   }
 
+  /**
+   * Make HTTP request with retry logic and error handling
+   */
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...this.getHeaders(),
-        ...options.headers,
-      },
-    });
+    let lastError: Error | undefined;
 
-    if (!response.ok) {
-      const error: LinkwardenError = {
-        message: `API error: ${response.status} ${response.statusText}`,
-        status: response.status,
-      };
-
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
-        const data = (await response.json()) as { message?: string };
-        error.message = data.message || error.message;
-      } catch {
-        // Response might not be JSON
-      }
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-      throw new Error(error.message);
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            ...this.getHeaders(),
+            ...options.headers,
+          },
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        // Handle error responses
+        if (!response.ok) {
+          throw this.createError(response, endpoint);
+        }
+
+        // Parse successful response
+        const data = (await response.json()) as { response: T };
+        return data.response;
+      } catch (error) {
+        lastError = error as Error;
+
+        // Don't retry on client errors (4xx) except rate limits
+        if (error instanceof APIError) {
+          if (error.status === 429 && attempt < this.maxRetries - 1) {
+            // Rate limit - retry with exponential backoff
+            const retryAfter =
+              error instanceof RateLimitError ? error.retryAfter : undefined;
+            const delayMs = retryAfter
+              ? retryAfter * 1000
+              : Math.pow(2, attempt) * 1000;
+            logger.warn(`Rate limited, retrying in ${delayMs}ms...`);
+            await delay(delayMs);
+            continue;
+          }
+          if (error.status && error.status >= 400 && error.status < 500) {
+            throw error; // Don't retry client errors
+          }
+        }
+
+        // Retry on network errors or server errors (5xx)
+        if (attempt < this.maxRetries - 1) {
+          const delayMs = Math.pow(2, attempt) * 1000; // Exponential backoff
+          logger.warn(
+            `Request failed (attempt ${attempt + 1}/${this.maxRetries}), retrying in ${delayMs}ms...`
+          );
+          await delay(delayMs);
+        }
+      }
     }
 
-    const data = (await response.json()) as { response: T };
-    return data.response;
+    // All retries exhausted
+    throw lastError;
+  }
+
+  /**
+   * Create appropriate error from response
+   */
+  private createError(response: Response, endpoint: string): APIError {
+    const status = response.status;
+    const message = `API error: ${status} ${response.statusText}`;
+
+    switch (status) {
+      case 401:
+        return new AuthError(endpoint);
+      case 404:
+        return new NotFoundError(endpoint, endpoint);
+      case 409:
+        return new ConflictError(message, endpoint);
+      case 429: {
+        // Try to get Retry-After header
+        const retryAfter = response.headers.get("Retry-After");
+        return new RateLimitError(
+          endpoint,
+          retryAfter ? parseInt(retryAfter, 10) : undefined
+        );
+      }
+      default:
+        if (status >= 500) {
+          return new ServerError(status, endpoint);
+        }
+        return new APIError(message, status, endpoint);
+    }
   }
 
   /**
@@ -199,25 +280,14 @@ export class LinkwardenAPI {
     collectionId: number,
     name?: string
   ): Promise<LinkwardenLink> {
-    const response = await fetch(`${this.baseUrl}/links`, {
+    return this.request<LinkwardenLink>("/links", {
       method: "POST",
-      headers: this.getHeaders(),
       body: JSON.stringify({
         url,
         name: name || url,
         collection: { id: collectionId },
       }),
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Failed to create link: ${response.status} - ${errorText}`
-      );
-    }
-
-    const data = (await response.json()) as { response: LinkwardenLink };
-    return data.response;
   }
 
   /**
@@ -231,9 +301,8 @@ export class LinkwardenAPI {
     // First fetch the existing link to get its collection and tags
     const existing = await this.getLink(id);
 
-    const response = await fetch(`${this.baseUrl}/links/${id}`, {
+    return this.request<LinkwardenLink>(`/links/${id}`, {
       method: "PUT",
-      headers: this.getHeaders(),
       body: JSON.stringify({
         id,
         name: updates.name ?? existing.name,
@@ -244,16 +313,6 @@ export class LinkwardenAPI {
         tags: existing.tags ?? [],
       }),
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Failed to update link: ${response.status} - ${errorText}`
-      );
-    }
-
-    const data = (await response.json()) as { response: LinkwardenLink };
-    return data.response;
   }
 
   /**
@@ -267,17 +326,9 @@ export class LinkwardenAPI {
    * Delete a link
    */
   async deleteLink(id: number): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/links/${id}`, {
+    await this.request<void>(`/links/${id}`, {
       method: "DELETE",
-      headers: this.getHeaders(),
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Failed to delete link: ${response.status} - ${errorText}`
-      );
-    }
   }
 
   /**
@@ -303,22 +354,12 @@ export class LinkwardenAPI {
 }
 
 /**
- * Get environment variable safely
- */
-function _getEnvVar(key: string): string | undefined {
-  if (typeof process !== "undefined" && process.env) {
-    return process.env[key];
-  }
-  return undefined;
-}
-
-/**
  * Create a Linkwarden API client for development
  * Uses environment variables: ENDPOINT, API_KEY
  */
 export function createDevClient(): LinkwardenAPI {
-  const url = _getEnvVar("ENDPOINT") || "http://localhost:3000";
-  const token = _getEnvVar("API_KEY");
+  const url = getEnvVar("ENDPOINT") || "http://localhost:3000";
+  const token = getEnvVar("API_KEY");
 
   if (!token) {
     throw new Error(
@@ -330,10 +371,10 @@ export function createDevClient(): LinkwardenAPI {
 }
 
 /**
- * Get the target collection name from environment
+ * Get the target collection name from environment or default
  */
 export function getTargetCollectionName(): string {
-  return _getEnvVar("COLLECTION") || "Bookmarks";
+  return getEnvVarWithDefault("COLLECTION", "Bookmarks");
 }
 
 /**

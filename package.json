@@ -1,7 +1,7 @@
 {
   "name": "lwsync",
   "version": "1.0.0",
-  "description": "Bidirectional sync between Linkwarden and browser bookmarks",
+  "description": "Cross-browser bidirectional sync between Linkwarden and browser bookmarks",
   "license": "MIT",
   "author": "WombatFromHell",
   "scripts": {
