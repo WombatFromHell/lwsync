@@ -8,9 +8,10 @@
 
 import { $ } from "bun";
 import { dirname } from "path";
+import { fileURLToPath } from "url";
 import { mkdirSync } from "fs";
 
-const scriptDir = dirname(import.meta.path);
+const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectDir = dirname(scriptDir);
 const distDir = `${projectDir}/dist`;
 

@@ -10,8 +10,9 @@
 import { $ } from "bun";
 import { existsSync, readFileSync } from "fs";
 import { join, dirname, resolve } from "path";
+import { fileURLToPath } from "url";
 
-const scriptDir = dirname(import.meta.path);
+const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectDir = dirname(scriptDir);
 const defaultDistDir = join(projectDir, "dist");
 

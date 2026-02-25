@@ -3,12 +3,16 @@
  * Handles bidirectional sync between Linkwarden and browser bookmarks
  */
 
+import type { LinkwardenAPI } from "./api";
+import type { LinkwardenCollection, LinkwardenLink } from "./types/api";
+import type { Mapping, PendingChange, SyncMetadata } from "./types/storage";
+import type { BookmarkNode } from "./types/bookmarks";
 import type {
-  LinkwardenAPI,
-  LinkwardenCollection,
-  LinkwardenLink,
-} from "./api";
-import type { Mapping, PendingChange } from "./storage";
+  ConflictResult,
+  MoveToken,
+  SyncResult,
+  ChecksumItem,
+} from "./types/sync";
 import * as storage from "./storage";
 import * as bookmarks from "./bookmarks";
 import { createLogger } from "./logger";
@@ -18,7 +22,7 @@ const logger = createLogger("LWSync");
 /**
  * Compute checksum for a Linkwarden item (for change detection)
  */
-export function computeChecksum(item: { name?: string; url?: string }): string {
+export function computeChecksum(item: ChecksumItem): string {
   const str = `${item.name || ""}|${item.url || ""}`;
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -35,11 +39,6 @@ export function computeChecksum(item: { name?: string; url?: string }): string {
  */
 const MOVE_TOKEN_PREFIX = "{LW:MOVE:";
 const MOVE_TOKEN_SUFFIX = "}";
-
-export interface MoveToken {
-  to: number; // Target parent collection ID
-  ts: number; // Timestamp
-}
 
 /**
  * Append move token to collection description
@@ -88,12 +87,12 @@ export function removeMoveToken(description: string | undefined): string {
 export async function isDescendantOf(
   folderBrowserId: string,
   targetParentId: string,
-  bookmarksCache?: Map<string, bookmarks.BookmarkNode>
+  bookmarksCache?: Map<string, BookmarkNode>
 ): Promise<boolean> {
   // Build cache if not provided
   if (!bookmarksCache) {
     bookmarksCache = new Map();
-    async function traverse(node: bookmarks.BookmarkNode) {
+    async function traverse(node: BookmarkNode) {
       bookmarksCache!.set(node.id, node);
       if (node.children) {
         for (const child of node.children) {
@@ -148,14 +147,14 @@ export function buildPath(
 
     // Find parent by checking if any collection contains this as a subcollection
     const parentCollection = Array.from(collectionsCache.values()).find((c) =>
-      c.collections?.some((sc) => sc.id === currentId)
+      c.collections?.some((sc: LinkwardenCollection) => sc.id === currentId)
     );
 
     if (!parentCollection) break;
     currentId = parentCollection.id;
   }
 
-  return "/" + parts.join("/");
+  return `/${parts.join("/")}`;
 }
 
 /**
@@ -164,7 +163,7 @@ export function buildPath(
  */
 export async function buildBrowserPath(
   browserId: string,
-  bookmarksCache: Map<string, bookmarks.BookmarkNode>
+  bookmarksCache: Map<string, BookmarkNode>
 ): Promise<string> {
   const parts: string[] = [];
   let currentId: string | undefined = browserId;
@@ -178,7 +177,7 @@ export async function buildBrowserPath(
     currentId = node.parentId;
   }
 
-  return "/" + parts.join("/");
+  return `/${parts.join("/")}`;
 }
 
 /**
@@ -315,10 +314,10 @@ export async function buildCollectionsCache(
  */
 export async function buildBookmarksCache(
   rootFolderId: string
-): Promise<Map<string, bookmarks.BookmarkNode>> {
-  const cache = new Map<string, bookmarks.BookmarkNode>();
+): Promise<Map<string, BookmarkNode>> {
+  const cache = new Map<string, BookmarkNode>();
 
-  async function traverse(node: bookmarks.BookmarkNode) {
+  async function traverse(node: BookmarkNode) {
     cache.set(node.id, node);
     if (node.children) {
       for (const child of node.children) {
@@ -334,11 +333,6 @@ export async function buildBookmarksCache(
 
   return cache;
 }
-
-/**
- * Conflict resolution result
- */
-export type ConflictResult = "no-op" | "use-remote" | "use-local";
 
 /**
  * Resolve conflicts between Linkwarden and browser bookmark
@@ -388,13 +382,7 @@ export class SyncEngine {
   /**
    * Perform a full sync
    */
-  async sync(): Promise<{
-    created: number;
-    updated: number;
-    deleted: number;
-    errors: string[];
-    skipped: number;
-  }> {
+  async sync(): Promise<SyncResult> {
     const errors: string[] = [];
     const stats = { created: 0, updated: 0, deleted: 0, skipped: 0 };
 
@@ -421,7 +409,7 @@ export class SyncEngine {
    * Used internally by sync() and initialize()
    */
   private async syncWithMetadata(
-    metadata: storage.SyncMetadata,
+    metadata: SyncMetadata,
     errors: string[],
     stats: {
       created: number;
@@ -429,13 +417,7 @@ export class SyncEngine {
       deleted: number;
       skipped: number;
     }
-  ): Promise<{
-    created: number;
-    updated: number;
-    deleted: number;
-    errors: string[];
-    skipped: number;
-  }> {
+  ): Promise<SyncResult> {
     if (this.isSyncing) {
       throw new Error("Sync already in progress");
     }
@@ -538,7 +520,7 @@ export class SyncEngine {
             metadata.targetCollectionId
           );
           const existingLink = existingLinks.find(
-            (l) => l.url === change.data.url
+            (l) => l.url === change.data!.url
           );
 
           if (existingLink) {
@@ -584,7 +566,9 @@ export class SyncEngine {
               const links = await this.api.getCollectionLinks(
                 metadata.targetCollectionId
               );
-              const existingLink = links.find((l) => l.url === change.data.url);
+              const existingLink = links.find(
+                (l) => l.url === change.data!.url
+              );
               if (existingLink) {
                 const mapping: Mapping = {
                   id: crypto.randomUUID(),
@@ -766,7 +750,7 @@ export class SyncEngine {
    * Sync from Linkwarden to browser
    */
   private async syncFromLinkwarden(
-    metadata: storage.SyncMetadata,
+    metadata: SyncMetadata,
     errors: string[],
     stats: {
       created: number;
@@ -878,7 +862,7 @@ export class SyncEngine {
     collection: LinkwardenCollection,
     parentBrowserId: string,
     collectionsCache: Map<number, LinkwardenCollection>,
-    bookmarksCache: Map<string, bookmarks.BookmarkNode>,
+    bookmarksCache: Map<string, BookmarkNode>,
     errors: string[],
     stats: {
       created: number;
@@ -1143,7 +1127,7 @@ export class SyncEngine {
     collection: LinkwardenCollection,
     parentBrowserId: string,
     collectionsCache: Map<number, LinkwardenCollection>,
-    bookmarksCache: Map<string, bookmarks.BookmarkNode>,
+    bookmarksCache: Map<string, BookmarkNode>,
     errors: string[],
     stats: {
       created: number;
@@ -1166,6 +1150,10 @@ export class SyncEngine {
 
         // Check for move token in description (browser → server move signal)
         const moveToken = extractMoveToken(collection.description);
+
+        // Track if we processed a move token (to avoid conflicting server-side move detection)
+        let moveTokenProcessed = false;
+
         if (moveToken) {
           // Find the target parent folder mapping
           const targetParentMapping = await storage.getMappingByLinkwardenId(
@@ -1201,6 +1189,9 @@ export class SyncEngine {
               await storage.upsertMapping(existing);
 
               logger.info("Folder move completed:", collection.name);
+
+              // Mark that we processed a move token
+              moveTokenProcessed = true;
             } catch (error) {
               logger.error("Failed to process move token:", error);
               errors.push(
@@ -1225,7 +1216,8 @@ export class SyncEngine {
         }
 
         // Check for server-side folder move (parentId changed without move token)
-        if (collection.parentId !== undefined) {
+        // Skip this check if we just processed a move token (to avoid conflicts)
+        if (collection.parentId !== undefined && !moveTokenProcessed) {
           // Get the current browser node to check its actual parent
           const currentNode = await bookmarks.get(existing.browserId);
           const actualBrowserParentId = currentNode?.parentId;
@@ -1405,7 +1397,7 @@ export class SyncEngine {
       }
 
       // Save metadata
-      const metadata: storage.SyncMetadata = {
+      const metadata: SyncMetadata = {
         id: "sync_state",
         lastSyncTime: 0,
         syncDirection,
@@ -1463,12 +1455,13 @@ export class SyncEngine {
         nameToCollection.set(c.name, c);
       }
 
-      let parentId: number | undefined = undefined;
+      let parentId: number | undefined;
       let targetCollection: LinkwardenCollection | undefined;
 
       // Traverse/create each level of the path
       for (let i = 0; i < pathParts.length; i++) {
         const partName = pathParts[i];
+        targetCollection = undefined; // Reset for each level
 
         // Find collection with this name under current parent
         // For root level (parentId === undefined), match collections with parentId === null
@@ -1513,7 +1506,7 @@ export class SyncEngine {
         }
 
         // Move to next level
-        parentId = targetCollection.id;
+        parentId = targetCollection!.id;
       }
 
       if (!targetCollection) {

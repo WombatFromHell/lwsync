@@ -37,3 +37,13 @@ export function detectBrowser(): BrowserType {
 export function getDefaultCollectionName(): string {
   return "Bookmarks";
 }
+
+/**
+ * Get environment variable safely
+ */
+function _getEnvVar(key: string): string | undefined {
+  if (typeof process !== "undefined" && process.env) {
+    return process.env[key];
+  }
+  return undefined;
+}

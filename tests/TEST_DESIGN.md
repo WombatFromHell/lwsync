@@ -1,6 +1,7 @@
 # Test Suite Design Document
 
-**Status:** ✅ Complete (89 tests passing)
+**Status:** ✅ Complete (105 tests passing)
+**Last Updated:** 2026-02-25
 
 Comprehensive test suite for the Linkwarden sync extension using Bun's test runner.
 
@@ -8,14 +9,15 @@ Comprehensive test suite for the Linkwarden sync extension using Bun's test runn
 
 ## 1. Overview
 
-| Metric | Value |
-|--------|-------|
-| **Total Tests** | 89 |
-| **Test Files** | 4 |
-| **Framework** | Bun test (`bun:test`) |
-| **Coverage** | Unit, Integration, E2E |
+| Metric          | Value                  |
+| --------------- | ---------------------- |
+| **Total Tests** | 105                    |
+| **Test Files**  | 4                      |
+| **Framework**   | Bun test (`bun:test`)  |
+| **Coverage**    | Unit, Integration, E2E |
 
 **Run Commands:**
+
 ```bash
 bun test                              # All tests
 bun test tests/sync.test.ts           # Unit tests only
@@ -30,11 +32,11 @@ bun test tests/sync.integration.test.ts  # Integration only
 
 **Golden Rule:** Never mock the system-under-test.
 
-| Test Type | Mock Policy |
-|-----------|-------------|
-| **Unit** | Pure functions only - no mocks |
+| Test Type       | Mock Policy                         |
+| --------------- | ----------------------------------- |
+| **Unit**        | Pure functions only - no mocks      |
 | **Integration** | Mock browser APIs only (`chrome.*`) |
-| **E2E** | No mocks - real Linkwarden API |
+| **E2E**         | No mocks - real Linkwarden API      |
 
 **Rationale:** Test business logic in isolation; mock only uncontrollable external dependencies.
 
@@ -44,17 +46,123 @@ bun test tests/sync.integration.test.ts  # Integration only
 
 ```
 tests/
-├── sync.test.ts              # Unit: Pure functions (conflict, checksums, moves)
-├── storage.test.ts           # Unit: Storage wrapper (with chrome.storage mock)
-├── api.e2e.test.ts           # E2E: Real Linkwarden API client
-└── sync.integration.test.ts  # Integration: Full sync engine round-trips
+├── fixtures/               # Test data factories
+│   ├── index.ts            # Barrel exports
+│   ├── mapping.ts          # Mapping factory
+│   ├── metadata.ts         # SyncMetadata factory
+│   ├── change.ts           # PendingChange factory
+│   ├── collection.ts       # LinkwardenCollection factory
+│   ├── link.ts             # LinkwardenLink factory
+│   └── bookmark.ts         # BookmarkNode factory
+├── mocks/                  # Mock implementations
+│   ├── index.ts            # Barrel exports
+│   ├── storage.ts          # MockStorage class
+│   ├── bookmarks.ts        # MockBookmarks class
+│   ├── browser.ts          # Browser mocks coordinator
+│   └── linkwarden.ts       # MockLinkwardenAPI class
+├── utils/                  # Test utilities
+│   ├── index.ts            # Barrel exports
+│   ├── generators.ts       # ID/time generators
+│   └── cleanup.ts          # Cleanup helpers
+├── sync.test.ts            # Unit: Pure functions
+├── storage.test.ts         # Unit: Storage wrapper
+├── api.e2e.test.ts         # E2E: Real Linkwarden API
+└── sync.integration.test.ts # Integration: Full sync engine
 ```
 
 ---
 
-## 4. Test Files
+## 4. Test Infrastructure
 
-### 4.1 `sync.test.ts` - Unit Tests (28 tests)
+### 4.1 Factories (`tests/fixtures/`)
+
+**Purpose:** Provide reusable test data creation with sensible defaults.
+
+| Factory         | Functions                                                            | Example                                   |
+| --------------- | -------------------------------------------------------------------- | ----------------------------------------- |
+| `mapping.ts`    | `createMapping()`, `createCollectionMapping()`                       | `createMapping({ linkwardenId: 1 })`      |
+| `metadata.ts`   | `createSyncMetadata()`                                               | `createSyncMetadata({ lastSyncTime: 0 })` |
+| `change.ts`     | `createChange()`, `updateChange()`, `deleteChange()`, `moveChange()` | `createChange({ type: "create" })`        |
+| `collection.ts` | `createCollection()`, `createSubcollection()`                        | `createCollection({ name: "Test" })`      |
+| `link.ts`       | `createLink()`, `createLinkWithDetails()`                            | `createLink(1, { url: "https://..." })`   |
+| `bookmark.ts`   | `createBookmark()`, `createBookmarkFolder()`                         | `createBookmark({ title: "Test" })`       |
+
+**Example Usage:**
+
+```typescript
+import { createMapping } from "./fixtures/mapping";
+import { createSyncMetadata } from "./fixtures/metadata";
+
+// Create mapping with defaults, override specific fields
+const mapping = createMapping({
+  linkwardenId: 1,
+  browserId: "bookmark-1",
+  checksum: "abc123",
+});
+
+// Create sync metadata
+const metadata = createSyncMetadata({
+  lastSyncTime: 0,
+  targetCollectionId: 1,
+});
+```
+
+### 4.2 Mocks (`tests/mocks/`)
+
+**Purpose:** Provide realistic mock implementations of browser and external APIs.
+
+| Mock            | Class/Function                                 | Description                                   |
+| --------------- | ---------------------------------------------- | --------------------------------------------- |
+| `storage.ts`    | `MockStorage`                                  | In-memory chrome.storage.local implementation |
+| `bookmarks.ts`  | `MockBookmarks`                                | In-memory bookmark tree with event support    |
+| `browser.ts`    | `setupBrowserMocks()`, `cleanupBrowserMocks()` | Install/remove all browser mocks              |
+| `linkwarden.ts` | `MockLinkwardenAPI`                            | In-memory Linkwarden API implementation       |
+
+**Example Usage:**
+
+```typescript
+import { setupBrowserMocks, cleanupBrowserMocks } from "./mocks/browser";
+import { MockLinkwardenAPI } from "./mocks/linkwarden";
+
+let mocks: ReturnType<typeof setupBrowserMocks>;
+let mockApi: MockLinkwardenAPI;
+
+beforeEach(() => {
+  mocks = setupBrowserMocks();
+  mockApi = new MockLinkwardenAPI();
+});
+
+afterEach(() => {
+  cleanupBrowserMocks();
+});
+```
+
+### 4.3 Utilities (`tests/utils/`)
+
+**Purpose:** Provide common test helpers and generators.
+
+| Utility         | Functions                                                                     | Description               |
+| --------------- | ----------------------------------------------------------------------------- | ------------------------- |
+| `generators.ts` | `uniqueId()`, `uniqueUrl()`, `uniqueTitle()`, `timestamp()`, `isoTimestamp()` | Generate unique test data |
+| `cleanup.ts`    | `clearStorage()`, `clearBookmarks()`, `fullCleanup()`                         | Clean up test state       |
+
+**Example Usage:**
+
+```typescript
+import { uniqueUrl, uniqueTitle, timestamp } from "./utils/generators";
+
+// Generate unique test data
+const url = uniqueUrl(); // "https://test-123456-abc123.example.com"
+const title = uniqueTitle("Test"); // "Test 1234567890"
+const now = timestamp(); // Current timestamp
+const past = timestamp(-60000); // 1 minute ago
+```
+
+---
+
+## 5. Test Files
+
+### 5.1 `sync.test.ts` - Unit Tests (28 tests)
 
 **Purpose:** Test pure functions in isolation.
 
@@ -71,13 +179,20 @@ tests/
 **Mock Policy:** None - pure functions only.
 
 **Example:**
+
 ```typescript
+import { resolveConflict } from "../src/sync";
+import { createMapping } from "../fixtures/mapping";
+
 test("returns use-remote when remote is newer", () => {
-  const mapping = createMapping(1000, "different");
+  const mapping = createMapping({
+    linkwardenUpdatedAt: 1000,
+    browserUpdatedAt: 2000,
+  });
   const remote = {
     name: "Test",
     url: "https://example.com",
-    updatedAt: new Date(2000).toISOString(),
+    updatedAt: new Date(3000).toISOString(),
   };
   const result = resolveConflict(mapping, remote);
   expect(result).toBe("use-remote");
@@ -86,7 +201,7 @@ test("returns use-remote when remote is newer", () => {
 
 ---
 
-### 4.2 `storage.test.ts` - Storage Unit Tests (21 tests)
+### 5.2 `storage.test.ts` - Storage Unit Tests (21 tests)
 
 **Purpose:** Test `chrome.storage.local` wrapper functions.
 
@@ -100,24 +215,42 @@ test("returns use-remote when remote is newer", () => {
 | Settings | 3 | `saveSettings`, `getSettings`, updates |
 | Utilities | 2 | `clearAll`, `getStorageUsage` |
 
-**Mock Policy:** `chrome.storage.local` mocked with in-memory `Record<string, unknown>`.
+**Mock Policy:** Uses `setupBrowserMocks()` from `tests/mocks/browser`.
 
 **Example:**
+
 ```typescript
-test("should update existing mapping (upsert)", async () => {
-  const mapping1 = { id: "mapping-1", checksum: "abc" };
-  const mapping2 = { id: "mapping-1", checksum: "updated" };
-  await storage.upsertMapping(mapping1);
-  await storage.upsertMapping(mapping2);
+import { setupBrowserMocks, cleanupBrowserMocks } from "../mocks/browser";
+import { createMapping } from "../fixtures/mapping";
+
+let mocks: ReturnType<typeof setupBrowserMocks>;
+
+beforeEach(() => {
+  mocks = setupBrowserMocks();
+});
+
+afterEach(() => {
+  cleanupBrowserMocks();
+});
+
+test("should add and retrieve a mapping", async () => {
+  const mapping = createMapping({
+    linkwardenId: 1,
+    browserId: "bookmark-1",
+    checksum: "abc123",
+  });
+
+  await storage.upsertMapping(mapping);
   const mappings = await storage.getMappings();
+
   expect(mappings.length).toBe(1);
-  expect(mappings[0].checksum).toBe("updated");
+  expect(mappings[0]).toEqual(mapping);
 });
 ```
 
 ---
 
-### 4.3 `api.e2e.test.ts` - API E2E Tests (8 tests)
+### 5.3 `api.e2e.test.ts` - API E2E Tests (8 tests)
 
 **Purpose:** Test Linkwarden API client with real server.
 
@@ -136,6 +269,7 @@ test("should update existing mapping (upsert)", async () => {
 **Mock Policy:** None - real Linkwarden API calls.
 
 **Configuration:** Uses `.env` file for credentials:
+
 ```
 ENDPOINT=https://your-linkwarden-instance.com
 COLLECTION=Bookmarks
@@ -145,61 +279,87 @@ COLLECTION=Bookmarks
 
 ---
 
-### 4.4 `sync.integration.test.ts` - Integration Tests (32 tests)
+### 5.4 `sync.integration.test.ts` - Integration Tests (48 tests)
 
 **Purpose:** Test full sync engine with mocked browser APIs.
 
 **What's Tested:**
 
 **Initial Sync (2 tests):**
+
 - Sync links from Linkwarden to browser on first sync
 - Handle empty collection gracefully
 
 **Incremental Sync (2 tests):**
+
 - Skip already synced items with no changes
 - Update browser bookmark when Linkwarden link changes
 
 **Conflict Resolution (2 tests):**
+
 - Prefer browser changes when browser is newer
 - Handle checksum match as no-op
 
 **Error Handling (3 tests):**
+
 - Handle missing sync metadata
 - Handle invalid collection ID
 - Continue sync even if one link fails
 
 **Round-Trip Scenarios (10+ tests):**
+
 - Browser → Server: Push new bookmarks
 - Browser → Server: Update Linkwarden links
 - Server → Browser: Detect remote changes
 - Delete propagation both directions
 
 **Subcollection Support (5+ tests):**
+
 - Sync nested subcollections
 - Handle duplicate folder names using path-based matching
 - Verify correct parent-child mappings
 
 **Folder Moves (4 tests):**
+
 - Browser → Server move using description token
 - Server → Browser move via `parentId` change
 - Circular move prevention
 - Token extraction/cleanup
 
-**Mock Policy:** 
+**Mock Policy:**
+
 - `MockLinkwardenAPI` - Full in-memory API implementation
-- `chrome.storage.local` - In-memory mock
-- `chrome.bookmarks` - In-memory tree structure mock
+- `chrome.storage.local` - Via `MockStorage` class
+- `chrome.bookmarks` - Via `MockBookmarks` class
 
 **Example:**
+
 ```typescript
-test("should handle browser → server folder move using description token", async () => {
+import { setupBrowserMocks, cleanupBrowserMocks } from "../mocks/browser";
+import { MockLinkwardenAPI } from "../mocks/linkwarden";
+
+let mocks: ReturnType<typeof setupBrowserMocks>;
+let mockApi: MockLinkwardenAPI;
+let syncEngine: SyncEngine;
+
+beforeEach(() => {
+  mocks = setupBrowserMocks();
+  mockApi = new MockLinkwardenAPI();
+  syncEngine = new SyncEngine(mockApi as unknown as LinkwardenAPI);
+});
+
+afterEach(() => {
+  cleanupBrowserMocks();
+});
+
+test("should handle browser → server folder move", async () => {
   // Create collection and sync
   const collection = await mockApi.createCollection("Test Folder", 1);
   await syncEngine.sync();
-  
+
   // Simulate browser move event
   await storage.addPendingChange({
-    id: "move-1",
+    id: crypto.randomUUID(),
     type: "move",
     source: "browser",
     browserId: "folder-1",
@@ -207,7 +367,7 @@ test("should handle browser → server folder move using description token", asy
     timestamp: Date.now(),
     resolved: false,
   });
-  
+
   // Sync and verify move token was processed
   await syncEngine.sync();
   const updated = await mockApi.getCollection(collection.id);
@@ -217,201 +377,133 @@ test("should handle browser → server folder move using description token", asy
 
 ---
 
-## 5. Test Data Management
+## 6. Test Coverage Matrix
 
-### Fixtures
+| Feature              | Unit | Storage | API E2E | Integration |
+| -------------------- | ---- | ------- | ------- | ----------- |
+| Checksum computation | ✅   | -       | -       | -           |
+| Conflict resolution  | ✅   | -       | -       | ✅          |
+| Move token helpers   | ✅   | -       | -       | -           |
+| Path parsing         | ✅   | -       | -       | -           |
+| Storage CRUD         | -    | ✅      | -       | ✅          |
+| Linkwarden API       | -    | -       | ✅      | -           |
+| Initial sync         | -    | -       | -       | ✅          |
+| Incremental sync     | -    | -       | -       | ✅          |
+| Browser → Server     | -    | -       | -       | ✅          |
+| Server → Browser     | -    | -       | -       | ✅          |
+| Subcollections       | -    | -       | -       | ✅          |
+| Folder moves         | -    | -       | -       | ✅          |
+| Duplicate handling   | -    | -       | -       | ✅          |
+| Error handling       | -    | -       | -       | ✅          |
 
-**In-Memory Mocks:**
-- `mockStorage: Record<string, unknown>` - Simulates `chrome.storage.local`
-- `mockBookmarks: Record<string, BookmarkNode>` - Simulates bookmark tree
-- `MockLinkwardenAPI` - Full API implementation with Maps for collections/links
+---
 
-### Cleanup
+## 7. Writing New Tests
 
-**Pattern:** `afterEach` hooks reset state:
+### 7.1 Test Naming Convention
+
+Use descriptive names that explain the expected behavior:
+
 ```typescript
-afterEach(() => {
-  Object.keys(mockStorage).forEach((key) => delete mockStorage[key]);
-  Object.keys(mockBookmarks).forEach((key) => delete mockBookmarks[key]);
-  createdLinks = [];
-  createdSubCollections = [];
+test("should <action> when <condition>", async () => {
+  // Test implementation
+});
+
+// Examples:
+test("should create mapping when link is synced");
+test("should skip already synced items with no changes");
+test("should prefer browser changes when browser is newer");
+```
+
+### 7.2 Test Structure (Arrange-Act-Assert)
+
+```typescript
+test("should do something", async () => {
+  // Arrange: Set up test data
+  const mapping = createMapping({ linkwardenId: 1 });
+  await storage.upsertMapping(mapping);
+
+  // Act: Execute the code under test
+  const result = await storage.getMappings();
+
+  // Assert: Verify the result
+  expect(result.length).toBe(1);
+  expect(result[0].linkwardenId).toBe(1);
 });
 ```
 
-**E2E Cleanup:** Real API tests delete created resources after each test.
+### 7.3 Using Factories
 
----
-
-## 6. Test Coverage Matrix
-
-| Feature | Unit | Storage | API E2E | Integration |
-|---------|------|---------|---------|-------------|
-| Checksum computation | ✅ | - | - | - |
-| Conflict resolution | ✅ | - | - | ✅ |
-| Move token helpers | ✅ | - | - | - |
-| Path parsing | ✅ | - | - | - |
-| Storage CRUD | - | ✅ | - | ✅ |
-| Linkwarden API | - | - | ✅ | - |
-| Initial sync | - | - | - | ✅ |
-| Incremental sync | - | - | - | ✅ |
-| Browser → Server | - | - | - | ✅ |
-| Server → Browser | - | - | - | ✅ |
-| Subcollections | - | - | - | ✅ |
-| Folder moves | - | - | - | ✅ |
-| Duplicate handling | - | - | - | ✅ |
-| Error handling | - | - | - | ✅ |
-
----
-
-## 7. Mock Implementations
-
-### 7.1 `MockLinkwardenAPI`
-
-**Features:**
-- In-memory collections/links using `Map<number, T>`
-- Full CRUD operations
-- Recursive `getCollectionTree()` for subcollections
-- Parent tracking for folder hierarchy
-- Automatic `updatedAt` timestamp generation
-- Move token support in `updateCollection()`
-
-**Example Usage:**
 ```typescript
-const mockApi = new MockLinkwardenAPI();
+import { createMapping, createCollectionMapping } from "./fixtures/mapping";
+import { createLink } from "./fixtures/link";
+import { createPendingChange } from "./fixtures/change";
+
+// Basic usage with defaults
+const mapping = createMapping();
+
+// Override specific fields
+const mapping = createMapping({
+  linkwardenId: 42,
+  checksum: "custom-checksum",
+});
+
+// Use specialized factories
+const collectionMapping = createCollectionMapping({ browserId: "folder-1" });
+const change = createPendingChange({ type: "update" });
+```
+
+### 7.4 Using Mocks
+
+```typescript
+import { setupBrowserMocks, cleanupBrowserMocks } from "./mocks/browser";
+import { MockLinkwardenAPI } from "./mocks/linkwarden";
+
+let mocks: ReturnType<typeof setupBrowserMocks>;
+let mockApi: MockLinkwardenAPI;
+
+beforeEach(() => {
+  // Install mocks
+  mocks = setupBrowserMocks();
+  mockApi = new MockLinkwardenAPI();
+});
+
+afterEach(() => {
+  // Cleanup mocks
+  cleanupBrowserMocks();
+});
+
+// Use mock API
 await mockApi.createLink("https://example.com", 1, "Test");
-const collection = await mockApi.getCollectionTree(1);
+
+// Use mock browser
+const bookmark = await new Promise<chrome.bookmarks.BookmarkTreeNode>(
+  (resolve) => {
+    chrome.bookmarks.create({ parentId: "2", title: "Test" }, resolve);
+  }
+);
 ```
 
-### 7.2 Browser API Mocks
+### 7.5 Using Utilities
 
-**`chrome.storage.local`:**
 ```typescript
-globalThis.chrome = {
-  storage: {
-    local: {
-      get: (keys, callback) => { /* ... */ },
-      set: (items, callback) => { /* ... */ },
-      getBytesInUse: (callback) => { /* ... */ },
-    },
-  },
-};
-```
+import { uniqueUrl, uniqueTitle, timestamp } from "./utils/generators";
 
-**`chrome.bookmarks`:**
-- Tree structure via `mockBookmarks` map
-- Parent-child relationships tracked
-- Events (`onCreated`, `onMoved`, etc.) stubbed
-- Full CRUD + `move()` + `getTree()`
+test("should handle unique data", async () => {
+  const url = uniqueUrl(); // Unique URL
+  const title = uniqueTitle("Test"); // Unique title
+  const oldTime = timestamp(-60000); // 1 minute ago
 
----
-
-## 8. Test Scenarios
-
-### Critical Paths
-
-| Scenario | Test File | Tests |
-|----------|-----------|-------|
-| First-time sync | `sync.integration.test.ts` | 2 |
-| Bidirectional sync loop | `sync.integration.test.ts` | 10+ |
-| Conflict: browser wins | `sync.test.ts`, `sync.integration.test.ts` | 3 |
-| Conflict: server wins | `sync.test.ts`, `sync.integration.test.ts` | 2 |
-| Folder move (both directions) | `sync.integration.test.ts` | 4 |
-| Duplicate folder names | `sync.integration.test.ts` | 2 |
-| Lost mapping recovery | `sync.integration.test.ts` | 1 |
-| API auth failure | `api.e2e.test.ts` | 1 |
-| Storage corruption | `storage.test.ts` | 2 |
-
-### Edge Cases
-
-| Edge Case | Test File |
-|-----------|-----------|
-| Empty collection | `sync.integration.test.ts` |
-| Very old/future timestamps | `sync.test.ts` |
-| Exact timestamp tie | `sync.test.ts` |
-| Malformed move tokens | `sync.test.ts` |
-| Multiple move tokens | `sync.test.ts` |
-| Invalid collection ID | `sync.integration.test.ts` |
-| Missing sync metadata | `sync.integration.test.ts` |
-
----
-
-## 9. Running Tests
-
-### Local Development
-```bash
-# All tests
-bun test
-
-# Specific file
-bun test tests/sync.test.ts
-
-# Pattern match
-bun test -t "conflict"
-```
-
-### CI/CD
-```bash
-# Install + test
-bun install
-bun test
-
-# With coverage (future)
-bun test --coverage
-```
-
-### Debugging
-```bash
-# Verbose output
-bun test --verbose
-
-# Specific test
-bun test -t "should handle browser → server folder move"
+  // Use in test
+  await mockApi.createLink(url, 1, title);
+});
 ```
 
 ---
 
-## 10. Future Enhancements
+## 8. Related Documents
 
-### Priority: High
-- [ ] **Performance tests** - Large collections (1000+ links)
-- [ ] **Regression tests** - Known bugs as test cases
-- [ ] **Visual regression** - Popup UI testing
-
-### Priority: Medium
-- [ ] **Stress tests** - Rapid consecutive syncs
-- [ ] **Network failure simulation** - API timeout/retry logic
-- [ ] **Concurrent modification** - Simultaneous browser/server changes
-
-### Priority: Low
-- [ ] **Accessibility tests** - Popup UI a11y
-- [ ] **Cross-browser tests** - Firefox-specific behavior
-- [ ] **Load tests** - Storage size limits
-
----
-
-## 11. Test Quality Guidelines
-
-### Writing New Tests
-
-1. **Name clearly:** `should <action> when <condition>`
-2. **Arrange-Act-Assert:** Group setup, execution, verification
-3. **One assertion per concept:** Multiple `expect()` OK if related
-4. **Cleanup:** Always reset state in `afterEach`
-5. **No flaky tests:** Avoid timing-dependent logic
-
-### Test Review Checklist
-
-- [ ] Test name describes behavior
-- [ ] Mocks are minimal and focused
-- [ ] Cleanup resets all modified state
-- [ ] Assertions are specific (not just `toBeTruthy()`)
-- [ ] Edge cases are covered
-- [ ] Test is deterministic (no randomness/timing)
-
----
-
-## 12. Related Documents
-
+- `PLAN.md` - Test mocks centralization plan
 - `DESIGN.md` - System architecture and design decisions
 - `AGENTS.md` - Quick reference for development commands
 - `MEMORY.md` - Current session notes and progress

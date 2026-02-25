@@ -14,8 +14,8 @@ import {
   createDevClient,
   getTargetCollectionName,
   findCollectionByName,
-  type LinkwardenLink,
 } from "../src/api";
+import type { LinkwardenLink } from "../src/types/api";
 
 // Test configuration
 const TEST_TIMEOUT = 30000;
@@ -152,7 +152,9 @@ describe("E2E: Linkwarden API", () => {
 
       // Verify deletion
       const collection = await api.getCollection(targetCollectionId);
-      const deletedLink = collection.links?.find((l) => l.id === link.id);
+      const deletedLink = collection.links?.find(
+        (l: { id: number }) => l.id === link.id
+      );
 
       expect(deletedLink).toBeUndefined();
     },

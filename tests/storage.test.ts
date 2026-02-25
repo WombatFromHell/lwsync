@@ -7,44 +7,19 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import * as storage from "../src/storage";
+import { setupBrowserMocks, cleanupBrowserMocks } from "./mocks/browser";
+import { createMapping, createCollectionMapping } from "./fixtures/mapping";
+import { createSyncMetadata } from "./fixtures/metadata";
+import { createPendingChange } from "./fixtures/change";
 
-// Mock chrome.storage.local
-const mockStorage: Record<string, unknown> = {};
-
-// @ts-expect-error - Mock for testing
-globalThis.chrome = {
-  storage: {
-    local: {
-      get: (
-        keys: string[],
-        callback: (result: Record<string, unknown>) => void
-      ) => {
-        const result: Record<string, unknown> = {};
-        for (const key of keys) {
-          result[key] = mockStorage[key];
-        }
-        setTimeout(() => callback(result), 0);
-      },
-      set: (items: Record<string, unknown>, callback?: () => void) => {
-        Object.assign(mockStorage, items);
-        if (callback) setTimeout(() => callback(), 0);
-      },
-      getBytesInUse: (callback: (bytes: number) => void) => {
-        setTimeout(() => callback(0), 0);
-      },
-    },
-  },
-  runtime: {
-    lastError: null,
-  },
-};
+let mocks: ReturnType<typeof setupBrowserMocks>;
 
 beforeEach(() => {
-  Object.keys(mockStorage).forEach((key) => delete mockStorage[key]);
+  mocks = setupBrowserMocks();
 });
 
 afterEach(() => {
-  Object.keys(mockStorage).forEach((key) => delete mockStorage[key]);
+  cleanupBrowserMocks();
 });
 
 describe("Storage: getAll/saveAll", () => {
@@ -59,30 +34,25 @@ describe("Storage: getAll/saveAll", () => {
 
   test("should save and retrieve all data", async () => {
     const testData = {
-      sync_metadata: {
-        id: "sync_state" as const,
+      sync_metadata: createSyncMetadata({
         lastSyncTime: 1234567890,
-        syncDirection: "bidirectional" as const,
         targetCollectionId: 42,
         browserRootFolderId: "folder-1",
-      },
+      }),
       mappings: [
-        {
-          id: "mapping-1",
-          linkwardenType: "link" as const,
+        createMapping({
           linkwardenId: 1,
           browserId: "bookmark-1",
-          linkwardenUpdatedAt: 1000,
-          browserUpdatedAt: 2000,
-          lastSyncedAt: 1500,
           checksum: "abc123",
-        },
+        }),
       ],
       pending_changes: [],
       settings: {
         serverUrl: "https://example.com",
         accessToken: "token123",
         syncInterval: 5,
+        targetCollectionName: "Bookmarks",
+        browserFolderName: "Other Bookmarks",
       },
       sync_log: [
         {
@@ -105,13 +75,11 @@ describe("Storage: getAll/saveAll", () => {
 
 describe("Storage: Sync Metadata", () => {
   test("should save and retrieve sync metadata", async () => {
-    const metadata = {
-      id: "sync_state" as const,
+    const metadata = createSyncMetadata({
       lastSyncTime: 1234567890,
-      syncDirection: "bidirectional" as const,
       targetCollectionId: 42,
       browserRootFolderId: "folder-1",
-    };
+    });
 
     await storage.saveSyncMetadata(metadata);
     const retrieved = await storage.getSyncMetadata();
@@ -125,26 +93,17 @@ describe("Storage: Sync Metadata", () => {
   });
 
   test("should update existing metadata", async () => {
-    const initial = {
-      id: "sync_state" as const,
-      lastSyncTime: 1000,
-      syncDirection: "bidirectional" as const,
-      targetCollectionId: 42,
-      browserRootFolderId: "folder-1",
-    };
+    const initial = createSyncMetadata({ lastSyncTime: 1000 });
 
     await storage.saveSyncMetadata(initial);
 
-    const updated = {
-      ...initial,
-      lastSyncTime: 2000,
-    };
+    const updated = createSyncMetadata({ lastSyncTime: 2000 });
 
     await storage.saveSyncMetadata(updated);
     const retrieved = await storage.getSyncMetadata();
 
     expect(retrieved?.lastSyncTime).toBe(2000);
-    expect(retrieved?.targetCollectionId).toBe(42); // Unchanged
+    expect(retrieved?.targetCollectionId).toBe(initial.targetCollectionId); // Unchanged
   });
 });
 
@@ -155,16 +114,11 @@ describe("Storage: Mappings", () => {
   });
 
   test("should add and retrieve a mapping", async () => {
-    const mapping = {
-      id: "mapping-1",
-      linkwardenType: "link" as const,
+    const mapping = createMapping({
       linkwardenId: 1,
       browserId: "bookmark-1",
-      linkwardenUpdatedAt: 1000,
-      browserUpdatedAt: 2000,
-      lastSyncedAt: 1500,
       checksum: "abc123",
-    };
+    });
 
     await storage.upsertMapping(mapping);
     const mappings = await storage.getMappings();
@@ -174,22 +128,19 @@ describe("Storage: Mappings", () => {
   });
 
   test("should update existing mapping (upsert)", async () => {
-    const mapping1 = {
-      id: "mapping-1",
-      linkwardenType: "link" as const,
+    const mapping1 = createMapping({
       linkwardenId: 1,
       browserId: "bookmark-1",
-      linkwardenUpdatedAt: 1000,
-      browserUpdatedAt: 2000,
-      lastSyncedAt: 1500,
       checksum: "abc123",
-    };
+    });
 
-    const mapping2 = {
-      ...mapping1,
+    const mapping2 = createMapping({
+      id: mapping1.id,
+      linkwardenId: mapping1.linkwardenId,
+      browserId: mapping1.browserId,
       checksum: "updated",
       lastSyncedAt: 3000,
-    };
+    });
 
     await storage.upsertMapping(mapping1);
     await storage.upsertMapping(mapping2);
@@ -201,27 +152,21 @@ describe("Storage: Mappings", () => {
   });
 
   test("should find mapping by Linkwarden ID", async () => {
-    await storage.upsertMapping({
-      id: "mapping-1",
-      linkwardenType: "link" as const,
-      linkwardenId: 1,
-      browserId: "bookmark-1",
-      linkwardenUpdatedAt: 1000,
-      browserUpdatedAt: 2000,
-      lastSyncedAt: 1500,
-      checksum: "abc",
-    });
+    await storage.upsertMapping(
+      createMapping({
+        linkwardenId: 1,
+        browserId: "bookmark-1",
+        checksum: "abc",
+      })
+    );
 
-    await storage.upsertMapping({
-      id: "mapping-2",
-      linkwardenType: "collection" as const,
-      linkwardenId: 2,
-      browserId: "folder-1",
-      linkwardenUpdatedAt: 1000,
-      browserUpdatedAt: 2000,
-      lastSyncedAt: 1500,
-      checksum: "def",
-    });
+    await storage.upsertMapping(
+      createCollectionMapping({
+        linkwardenId: 2,
+        browserId: "folder-1",
+        checksum: "def",
+      })
+    );
 
     const found = await storage.getMappingByLinkwardenId(1, "link");
     expect(found).toBeDefined();
@@ -229,16 +174,13 @@ describe("Storage: Mappings", () => {
   });
 
   test("should find mapping by browser ID", async () => {
-    await storage.upsertMapping({
-      id: "mapping-1",
-      linkwardenType: "link" as const,
+    const mapping = createMapping({
       linkwardenId: 1,
       browserId: "bookmark-1",
-      linkwardenUpdatedAt: 1000,
-      browserUpdatedAt: 2000,
-      lastSyncedAt: 1500,
       checksum: "abc",
     });
+
+    await storage.upsertMapping(mapping);
 
     const found = await storage.getMappingByBrowserId("bookmark-1");
     expect(found).toBeDefined();
@@ -246,17 +188,13 @@ describe("Storage: Mappings", () => {
   });
 
   test("should remove mapping by Linkwarden ID", async () => {
-    await storage.upsertMapping({
-      id: "mapping-1",
-      linkwardenType: "link" as const,
+    const mapping = createMapping({
       linkwardenId: 1,
       browserId: "bookmark-1",
-      linkwardenUpdatedAt: 1000,
-      browserUpdatedAt: 2000,
-      lastSyncedAt: 1500,
       checksum: "abc",
     });
 
+    await storage.upsertMapping(mapping);
     await storage.removeMapping(1, "link");
     const mappings = await storage.getMappings();
 
@@ -265,36 +203,21 @@ describe("Storage: Mappings", () => {
 
   test("should handle multiple mappings", async () => {
     const mappings = [
-      {
-        id: "mapping-1",
-        linkwardenType: "link" as const,
+      createMapping({
         linkwardenId: 1,
         browserId: "bookmark-1",
-        linkwardenUpdatedAt: 1000,
-        browserUpdatedAt: 2000,
-        lastSyncedAt: 1500,
         checksum: "abc",
-      },
-      {
-        id: "mapping-2",
-        linkwardenType: "link" as const,
+      }),
+      createMapping({
         linkwardenId: 2,
         browserId: "bookmark-2",
-        linkwardenUpdatedAt: 1000,
-        browserUpdatedAt: 2000,
-        lastSyncedAt: 1500,
         checksum: "def",
-      },
-      {
-        id: "mapping-3",
-        linkwardenType: "collection" as const,
+      }),
+      createCollectionMapping({
         linkwardenId: 3,
         browserId: "folder-1",
-        linkwardenUpdatedAt: 1000,
-        browserUpdatedAt: 2000,
-        lastSyncedAt: 1500,
         checksum: "ghi",
-      },
+      }),
     ];
 
     for (const mapping of mappings) {
@@ -313,14 +236,11 @@ describe("Storage: Pending Changes", () => {
   });
 
   test("should add pending change", async () => {
-    const change = {
-      id: "change-1",
-      type: "create" as const,
-      source: "browser" as const,
+    const change = createPendingChange({
+      type: "create",
+      source: "browser",
       browserId: "bookmark-1",
-      timestamp: Date.now(),
-      resolved: false,
-    };
+    });
 
     await storage.addPendingChange(change);
     const changes = await storage.getPendingChanges();
@@ -330,40 +250,39 @@ describe("Storage: Pending Changes", () => {
   });
 
   test("should mark change as resolved", async () => {
-    const change = {
-      id: "change-1",
-      type: "update" as const,
-      source: "browser" as const,
+    const change = createPendingChange({
+      type: "update",
+      source: "browser",
       browserId: "bookmark-1",
-      timestamp: Date.now(),
-      resolved: false,
-    };
+    });
 
     await storage.addPendingChange(change);
-    await storage.resolvePendingChange("change-1");
+    await storage.resolvePendingChange(change.id);
 
     const changes = await storage.getPendingChanges();
     expect(changes[0].resolved).toBe(true);
   });
 
   test("should cleanup resolved changes", async () => {
-    await storage.addPendingChange({
-      id: "change-1",
-      type: "create" as const,
-      source: "browser" as const,
-      browserId: "bookmark-1",
-      timestamp: Date.now(),
-      resolved: false,
-    });
+    await storage.addPendingChange(
+      createPendingChange({
+        id: "change-1",
+        type: "create",
+        source: "browser",
+        browserId: "bookmark-1",
+        resolved: false,
+      })
+    );
 
-    await storage.addPendingChange({
-      id: "change-2",
-      type: "delete" as const,
-      source: "browser" as const,
-      browserId: "bookmark-2",
-      timestamp: Date.now(),
-      resolved: true, // Already resolved
-    });
+    await storage.addPendingChange(
+      createPendingChange({
+        id: "change-2",
+        type: "delete",
+        source: "browser",
+        browserId: "bookmark-2",
+        resolved: true, // Already resolved
+      })
+    );
 
     await storage.cleanupResolvedChanges();
     const changes = await storage.getPendingChanges();
@@ -399,6 +318,8 @@ describe("Storage: Settings", () => {
       serverUrl: "https://original.com",
       accessToken: "token1",
       syncInterval: 5,
+      targetCollectionName: "Bookmarks",
+      browserFolderName: "Other Bookmarks",
     };
 
     await storage.saveSettings(initial);
@@ -418,29 +339,28 @@ describe("Storage: Settings", () => {
 
 describe("Storage: Clear All", () => {
   test("should reset storage to default state", async () => {
-    await storage.saveSyncMetadata({
-      id: "sync_state",
-      lastSyncTime: 1234567890,
-      syncDirection: "bidirectional",
-      targetCollectionId: 42,
-      browserRootFolderId: "folder-1",
-    });
+    await storage.saveSyncMetadata(
+      createSyncMetadata({
+        lastSyncTime: 1234567890,
+        targetCollectionId: 42,
+        browserRootFolderId: "folder-1",
+      })
+    );
 
-    await storage.upsertMapping({
-      id: "mapping-1",
-      linkwardenType: "link",
-      linkwardenId: 1,
-      browserId: "bookmark-1",
-      linkwardenUpdatedAt: 1000,
-      browserUpdatedAt: 2000,
-      lastSyncedAt: 1500,
-      checksum: "abc",
-    });
+    await storage.upsertMapping(
+      createMapping({
+        linkwardenId: 1,
+        browserId: "bookmark-1",
+        checksum: "abc",
+      })
+    );
 
     await storage.saveSettings({
       serverUrl: "https://example.com",
       accessToken: "token",
       syncInterval: 5,
+      targetCollectionName: "Bookmarks",
+      browserFolderName: "Other Bookmarks",
     });
 
     await storage.clearAll();

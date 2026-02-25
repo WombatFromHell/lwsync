@@ -9,49 +9,14 @@
  */
 
 import { createLogger } from "./logger";
+import type {
+  LinkwardenCollection,
+  LinkwardenLink,
+  LinkwardenError,
+} from "./types/api";
+export type { LinkwardenCollection, LinkwardenLink } from "./types/api";
 
 const logger = createLogger("LWSync API");
-
-export interface LinkwardenCollection {
-  id: number;
-  name: string;
-  description?: string;
-  color?: string;
-  isPublic: boolean;
-  ownerId: number;
-  parentId?: number; // Parent collection ID for hierarchical structure
-  createdAt: string;
-  updatedAt: string;
-  links?: LinkwardenLink[];
-  collections?: LinkwardenCollection[];
-}
-
-export interface LinkwardenLink {
-  id: number;
-  name: string;
-  type: "url";
-  description?: string;
-  url: string;
-  collectionId?: number; // May be present
-  collection?: {
-    // Or this object
-    id: number;
-    name?: string;
-  };
-  createdAt: string;
-  updatedAt: string;
-  tags?: LinkwardenTag[];
-}
-
-export interface LinkwardenTag {
-  id: number;
-  name: string;
-}
-
-export interface LinkwardenError {
-  message: string;
-  status?: number;
-}
 
 export class LinkwardenAPI {
   private baseUrl: string;
@@ -59,7 +24,7 @@ export class LinkwardenAPI {
 
   constructor(serverUrl: string, token: string) {
     // Remove trailing slash if present
-    this.baseUrl = serverUrl.replace(/\/$/, "") + "/api/v1";
+    this.baseUrl = `${serverUrl.replace(/\/$/, "")}/api/v1`;
     this.token = token;
   }
 
@@ -90,17 +55,17 @@ export class LinkwardenAPI {
       };
 
       try {
-        const data = await response.json();
+        const data = (await response.json()) as { message?: string };
         error.message = data.message || error.message;
       } catch {
         // Response might not be JSON
       }
 
-      throw error;
+      throw new Error(error.message);
     }
 
-    const data = await response.json();
-    return data.response as T;
+    const data = (await response.json()) as { response: T };
+    return data.response;
   }
 
   /**
@@ -155,7 +120,9 @@ export class LinkwardenAPI {
       // or if it appears in the collections array
       return (
         c.parentId === id ||
-        collection.collections?.some((sc) => sc.id === c.id)
+        collection.collections?.some(
+          (sc: LinkwardenCollection) => sc.id === c.id
+        )
       );
     });
 
@@ -249,8 +216,8 @@ export class LinkwardenAPI {
       );
     }
 
-    const data = await response.json();
-    return data.response as LinkwardenLink;
+    const data = (await response.json()) as { response: LinkwardenLink };
+    return data.response;
   }
 
   /**
@@ -285,8 +252,8 @@ export class LinkwardenAPI {
       );
     }
 
-    const data = await response.json();
-    return data.response as LinkwardenLink;
+    const data = (await response.json()) as { response: LinkwardenLink };
+    return data.response;
   }
 
   /**
@@ -336,12 +303,22 @@ export class LinkwardenAPI {
 }
 
 /**
+ * Get environment variable safely
+ */
+function _getEnvVar(key: string): string | undefined {
+  if (typeof process !== "undefined" && process.env) {
+    return process.env[key];
+  }
+  return undefined;
+}
+
+/**
  * Create a Linkwarden API client for development
  * Uses environment variables: ENDPOINT, API_KEY
  */
 export function createDevClient(): LinkwardenAPI {
-  const url = process.env.ENDPOINT || "http://localhost:3000";
-  const token = process.env.API_KEY;
+  const url = _getEnvVar("ENDPOINT") || "http://localhost:3000";
+  const token = _getEnvVar("API_KEY");
 
   if (!token) {
     throw new Error(
@@ -356,7 +333,7 @@ export function createDevClient(): LinkwardenAPI {
  * Get the target collection name from environment
  */
 export function getTargetCollectionName(): string {
-  return process.env.COLLECTION || "Bookmarks";
+  return _getEnvVar("COLLECTION") || "Bookmarks";
 }
 
 /**

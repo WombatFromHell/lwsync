@@ -11,7 +11,7 @@ import {
   removeMoveToken,
   parseFolderPath,
 } from "../src/sync";
-import type { Mapping } from "../src/storage";
+import type { Mapping } from "../src/types/storage";
 
 describe("computeChecksum", () => {
   test("returns same checksum for same input", () => {

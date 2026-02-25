@@ -7,12 +7,9 @@ import { useState, useEffect, useCallback } from "preact/hooks";
 import { createLogger } from "./logger";
 import { getDefaultCollectionName } from "./browser";
 import { getDefaultBrowserRootFolderName } from "./bookmarks";
+import type { LogEntry, Settings } from "./types/storage";
 
 const logger = createLogger("LWSync popup");
-
-// ============================================================================
-// Types
-// ============================================================================
 
 interface StatusResponse {
   configured: boolean;
@@ -22,20 +19,6 @@ interface StatusResponse {
   pendingChangesCount: number;
   storageBytes?: number;
   syncLog?: LogEntry[];
-}
-
-interface LogEntry {
-  timestamp: number;
-  type: "info" | "success" | "error" | "warning";
-  message: string;
-}
-
-interface Settings {
-  serverUrl: string;
-  accessToken: string;
-  syncInterval: number;
-  targetCollectionName: string;
-  browserFolderName: string;
 }
 
 // ============================================================================
@@ -719,7 +702,7 @@ function App() {
         showStatus("Connection failed. Check your URL and token.", "error");
       }
     } catch (error) {
-      showStatus("Connection failed: " + error, "error");
+      showStatus(`Connection failed: ${error}`, "error");
     }
   }, [settings.serverUrl, settings.accessToken, showStatus]);
 
@@ -750,7 +733,7 @@ function App() {
       await updateStatus();
     } catch (error) {
       logger.error("Save error:", error);
-      showStatus("Failed to save: " + error, "error");
+      showStatus(`Failed to save: ${error}`, "error");
     }
   }, [settings, showStatus, updateStatus]);
 
@@ -772,7 +755,7 @@ function App() {
 
       showStatus("Sync completed!", "success");
     } catch (error) {
-      showStatus("Sync failed: " + error, "error");
+      showStatus(`Sync failed: ${error}`, "error");
     }
   }, [updateStatus, showStatus]);
 
@@ -783,7 +766,7 @@ function App() {
       showStatus("Sync reset successfully. You can reconfigure now.", "info");
       await Promise.all([updateStatus(), loadSettings()]);
     } catch (error) {
-      showStatus("Reset failed: " + error, "error");
+      showStatus(`Reset failed: ${error}`, "error");
     }
   }, [updateStatus, loadSettings, showStatus]);
 
@@ -815,7 +798,7 @@ function App() {
         await loadSettings();
       } catch (error) {
         logger.error("Update interval error:", error);
-        showStatus("Failed to update: " + error, "error");
+        showStatus(`Failed to update: ${error}`, "error");
       }
     },
     [showStatus, loadSettings]
@@ -832,7 +815,7 @@ function App() {
         await loadSettings();
       } catch (error) {
         logger.error("Update browser folder error:", error);
-        showStatus("Failed to update: " + error, "error");
+        showStatus(`Failed to update: ${error}`, "error");
       }
     },
     [showStatus, loadSettings]
@@ -852,7 +835,7 @@ function App() {
         await loadSettings();
       } catch (error) {
         logger.error("Update target collection error:", error);
-        showStatus("Failed to update: " + error, "error");
+        showStatus(`Failed to update: ${error}`, "error");
       }
     },
     [showStatus, loadSettings]

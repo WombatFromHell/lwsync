@@ -17,16 +17,24 @@ export interface Logger {
 }
 
 /**
+ * Get environment variable safely
+ */
+function _getEnvVar(key: string): string | undefined {
+  if (typeof process !== "undefined" && process.env) {
+    return process.env[key];
+  }
+  return undefined;
+}
+
+/**
  * Check if we're running in a test environment
  */
 function isTestEnvironment(): boolean {
   // Check multiple environment variables for test detection
-  if (typeof process !== "undefined" && process.env) {
-    // Bun test environment
-    if (process.env.BUN_ENV === "test") return true;
-    // Node.js test environment
-    if (process.env.NODE_ENV === "test") return true;
-  }
+  const bunEnv = _getEnvVar("BUN_ENV");
+  const nodeEnv = _getEnvVar("NODE_ENV");
+
+  if (bunEnv === "test" || nodeEnv === "test") return true;
   return false;
 }
 

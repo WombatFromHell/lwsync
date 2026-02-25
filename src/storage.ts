@@ -5,59 +5,24 @@
 
 import { createLogger } from "./logger";
 import { getDefaultCollectionName } from "./browser";
+import type {
+  SyncMetadata,
+  Mapping,
+  PendingChange,
+  LogEntry,
+  Settings,
+  StorageData,
+} from "./types/storage";
+export type {
+  SyncMetadata,
+  Mapping,
+  PendingChange,
+  LogEntry,
+  Settings,
+  StorageData,
+} from "./types/storage";
 
 const logger = createLogger("LWSync storage");
-
-export interface SyncMetadata {
-  id: "sync_state";
-  lastSyncTime: number;
-  syncDirection: "bidirectional" | "to-browser" | "to-linkwarden";
-  targetCollectionId: number;
-  browserRootFolderId: string;
-}
-
-export interface Mapping {
-  id: string;
-  linkwardenType: "link" | "collection";
-  linkwardenId: number;
-  browserId: string;
-  linkwardenUpdatedAt: number;
-  browserUpdatedAt: number;
-  lastSyncedAt: number;
-  checksum: string;
-}
-
-export interface PendingChange {
-  id: string;
-  type: "create" | "update" | "delete" | "move";
-  source: "linkwarden" | "browser";
-  linkwardenId?: number;
-  browserId?: string;
-  parentId?: number | string;
-  data?: { url?: string; title?: string };
-  timestamp: number;
-  resolved: boolean;
-}
-
-export interface LogEntry {
-  timestamp: number;
-  type: "info" | "success" | "error" | "warning";
-  message: string;
-}
-
-export interface StorageData {
-  sync_metadata: SyncMetadata | null;
-  mappings: Mapping[];
-  pending_changes: PendingChange[];
-  settings: {
-    serverUrl: string;
-    accessToken: string;
-    syncInterval: number; // minutes
-    targetCollectionName: string; // case-sensitive Linkwarden collection name (supports paths)
-    browserFolderName: string; // browser bookmark folder name (supports paths)
-  } | null;
-  sync_log: LogEntry[];
-}
 
 const DEFAULT_STORAGE: StorageData = {
   sync_metadata: null,
@@ -76,11 +41,11 @@ export async function getAll(): Promise<StorageData> {
       ["sync_metadata", "mappings", "pending_changes", "settings", "sync_log"],
       (result) => {
         resolve({
-          sync_metadata: result.sync_metadata || null,
-          mappings: result.mappings || [],
-          pending_changes: result.pending_changes || [],
-          settings: result.settings || null,
-          sync_log: result.sync_log || [],
+          sync_metadata: (result.sync_metadata as SyncMetadata) || null,
+          mappings: (result.mappings as Mapping[]) || [],
+          pending_changes: (result.pending_changes as PendingChange[]) || [],
+          settings: (result.settings as Settings) || null,
+          sync_log: (result.sync_log as LogEntry[]) || [],
         });
       }
     );
@@ -245,12 +210,7 @@ export async function cleanupResolvedChanges(): Promise<void> {
 /**
  * Get settings
  */
-export async function getSettings(): Promise<{
-  serverUrl: string;
-  accessToken: string;
-  syncInterval: number;
-  targetCollectionName: string;
-} | null> {
+export async function getSettings(): Promise<Settings | null> {
   const data = await getAll();
   return data.settings;
 }
@@ -258,13 +218,7 @@ export async function getSettings(): Promise<{
 /**
  * Save settings
  */
-export async function saveSettings(settings: {
-  serverUrl: string;
-  accessToken: string;
-  syncInterval: number;
-  targetCollectionName?: string;
-  browserFolderName?: string;
-}): Promise<void> {
+export async function saveSettings(settings: Settings): Promise<void> {
   const data = await getAll();
   data.settings = {
     serverUrl: settings.serverUrl,

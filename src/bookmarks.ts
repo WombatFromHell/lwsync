@@ -3,19 +3,9 @@
  * Provides a Promise-based interface for chrome.bookmarks
  */
 
-import type { Mapping } from "./storage";
+import type { Mapping } from "./types/storage";
+import type { BookmarkNode } from "./types/bookmarks";
 import { detectBrowser } from "./browser";
-
-export interface BookmarkNode {
-  id: string;
-  parentId?: string;
-  index?: number;
-  title?: string;
-  url?: string;
-  dateAdded?: number;
-  dateGroupModified?: number;
-  children?: BookmarkNode[];
-}
 
 /**
  * Get the entire bookmarks tree
