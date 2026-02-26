@@ -1,6 +1,6 @@
 # LWSync
 
-**Bidirectional sync between Linkwarden and your browser bookmarks.**
+**Cross-browser bidirectional sync between Linkwarden and browser bookmarks.**
 
 LWSync is a browser extension that keeps your Linkwarden collections in sync with your browser bookmarks. Changes flow both ways—edit in Linkwarden or your browser, and LWSync keeps everything up to date.
 
