@@ -54,10 +54,11 @@ All sync data is stored **locally** in your browser using `chrome.storage.local`
 
 ### Browser Requirements
 
-| Browser | Minimum Version | Manifest                    |
-| ------- | --------------- | --------------------------- |
-| Chrome  | 88+             | Manifest V3                 |
-| Firefox | 109+            | Manifest V2 (WebExtensions) |
+| Browser | Minimum Version | Manifest     |
+| ------- | --------------- | ------------ |
+| Chrome  | 88+             | Manifest V3  |
+| Firefox | 128+            | Manifest V3  |
+| Edge    | 88+             | Manifest V3  |
 
 ### Linkwarden Requirements
 
@@ -109,6 +110,7 @@ All sync data is stored **locally** in your browser using `chrome.storage.local`
    - Go to `about:debugging#/runtime/this-firefox`
    - Click "Load Temporary Add-on"
    - Select `dist/firefox/manifest.json`
+   - Note: Firefox uses temporary add-ons for development; for permanent installation, package as XPI
 
 ---
 
@@ -236,10 +238,12 @@ bun test
 **AMO Requirements:**
 
 - Single ZIP file (`LWSync-firefox.zip`)
-- Manifest V2 compatible (WebExtensions)
+- Manifest V3 compatible (Firefox 128+)
 - Detailed description of functionality
 - Privacy policy (link to this README's privacy section)
 - Screenshots of the extension UI
+
+**Note:** Firefox 128+ supports Manifest V3. The extension uses `background.scripts` instead of `background.service_worker` per Firefox MV3 requirements.
 
 ---
 

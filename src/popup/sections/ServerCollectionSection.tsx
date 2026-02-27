@@ -1,10 +1,10 @@
 /**
  * ServerCollectionSection Component
- * Allows updating the target collection name on the server
  */
 
 import { useState, useEffect } from "preact/hooks";
 import { getDefaultCollectionName } from "../../browser";
+import { Section, Input, Button } from "../ui";
 
 export interface ServerCollectionSectionProps {
   targetCollectionName: string;
@@ -33,35 +33,40 @@ export function ServerCollectionSection({
   };
 
   return (
-    <div id="server-collection-section" className="section">
-      <div className="section-title">Server Collection</div>
-
-      <label htmlFor="targetCollectionName">Target Collection Name</label>
-      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-        <input
-          type="text"
-          id="targetCollectionName"
-          placeholder="e.g. Bookmarks/Linkwarden"
-          value={collectionName}
-          style={{ marginBottom: "0" }}
-          onInput={(e) =>
-            setCollectionName((e.target as HTMLInputElement).value)
-          }
-        />
-        <button
+    <Section id="server-collection-section" title="Server Collection">
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <Input
+            id="targetCollectionName"
+            label="Target Collection Name"
+            type="text"
+            placeholder="e.g. Bookmarks/Linkwarden"
+            value={collectionName}
+            onInput={(e) =>
+              setCollectionName((e.target as HTMLInputElement).value)
+            }
+          />
+        </div>
+        <Button
           id="updateCollectionBtn"
-          className="btn-secondary"
-          style={{ width: "auto", padding: "8px 16px" }}
+          variant="secondary"
           onClick={handleUpdate}
           disabled={isUpdating}
+          loading={isUpdating}
+          fullWidth={false}
         >
           {isUpdating ? "Updating..." : "Update"}
-        </button>
+        </Button>
       </div>
-      <p className="help-text">
+      <p
+        className="
+          mt-[2px] mb-[14px] text-[11px] text-slate-500
+          dark:text-slate-400
+        "
+      >
         Case-sensitive. Use / for nested collections. Will be created if it
         doesn&apos;t exist.
       </p>
-    </div>
+    </Section>
   );
 }

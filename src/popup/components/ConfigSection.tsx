@@ -1,10 +1,10 @@
 /**
  * ConfigSection Component
- * Server configuration form for initial setup
  */
 
 import { useState } from "preact/hooks";
 import type { Settings } from "../../types/storage";
+import { Section, Input, Button } from "../ui";
 
 export interface ConfigSectionProps {
   settings: Settings;
@@ -62,97 +62,99 @@ export function ConfigSection({
   };
 
   return (
-    <div id="config-section" className="section">
-      <div className="section-title">Server Configuration</div>
+    <Section id="config-section" title="Server Configuration">
+      <div className="space-y-4">
+        <Input
+          id="serverUrl"
+          label="Linkwarden URL"
+          type="text"
+          placeholder="https://linkwarden.example.com"
+          value={settings.serverUrl}
+          onInput={(e) =>
+            updateField("serverUrl", (e.target as HTMLInputElement).value)
+          }
+          helpText="Your Linkwarden instance URL (with https://)"
+        />
 
-      <label htmlFor="serverUrl">Linkwarden URL</label>
-      <input
-        type="text"
-        id="serverUrl"
-        placeholder="https://linkwarden.example.com"
-        value={settings.serverUrl}
-        onInput={(e) =>
-          updateField("serverUrl", (e.target as HTMLInputElement).value)
-        }
-      />
-      <p className="help-text">your Linkwarden instance URL (with https://)</p>
+        <Input
+          id="accessToken"
+          label="Access Token"
+          type="password"
+          placeholder="Enter your access token"
+          value={settings.accessToken}
+          onInput={(e) =>
+            updateField("accessToken", (e.target as HTMLInputElement).value)
+          }
+          helpText="Create a token in Settings → Access Tokens"
+        />
 
-      <label htmlFor="accessToken">Access Token</label>
-      <input
-        type="password"
-        id="accessToken"
-        placeholder="Enter your access token"
-        value={settings.accessToken}
-        onInput={(e) =>
-          updateField("accessToken", (e.target as HTMLInputElement).value)
-        }
-      />
-      <p className="help-text">Create a token in Settings → Access Tokens</p>
+        <Input
+          id="syncInterval"
+          label="Sync Interval (minutes)"
+          type="number"
+          min={1}
+          max={60}
+          value={settings.syncInterval}
+          onInput={(e) =>
+            updateField(
+              "syncInterval",
+              parseInt((e.target as HTMLInputElement).value, 10) || 5
+            )
+          }
+          helpText="How often to sync automatically"
+        />
 
-      <label htmlFor="syncInterval">Sync Interval (minutes)</label>
-      <input
-        type="number"
-        id="syncInterval"
-        min="1"
-        max="60"
-        value={settings.syncInterval}
-        onInput={(e) =>
-          updateField(
-            "syncInterval",
-            parseInt((e.target as HTMLInputElement).value, 10) || 5
-          )
-        }
-      />
+        <Input
+          id="targetCollection"
+          label="Target Collection Name"
+          type="text"
+          placeholder="e.g. Bookmarks/Linkwarden"
+          value={settings.targetCollectionName}
+          onInput={(e) =>
+            updateField(
+              "targetCollectionName",
+              (e.target as HTMLInputElement).value
+            )
+          }
+          helpText="Case-sensitive. Use / for nested collections."
+        />
 
-      <label htmlFor="targetCollection">Target Collection Name</label>
-      <input
-        type="text"
-        id="targetCollection"
-        placeholder="e.g. Bookmarks/Linkwarden"
-        value={settings.targetCollectionName}
-        onInput={(e) =>
-          updateField(
-            "targetCollectionName",
-            (e.target as HTMLInputElement).value
-          )
-        }
-      />
-      <p className="help-text">
-        Case-sensitive. Use / for nested collections. Will be created if it
-        doesn&apos;t exist.
-      </p>
+        <Input
+          id="browserFolder"
+          label="Browser Bookmark Folder"
+          type="text"
+          placeholder="e.g. Work/Links (leave empty for root)"
+          value={settings.browserFolderName}
+          onInput={(e) =>
+            updateField(
+              "browserFolderName",
+              (e.target as HTMLInputElement).value
+            )
+          }
+          helpText="Use / for nested folders. Leave empty for root."
+        />
+      </div>
 
-      <label htmlFor="browserFolder">Browser Bookmark Folder</label>
-      <input
-        type="text"
-        id="browserFolder"
-        placeholder="e.g. Work/Links (leave empty for root)"
-        value={settings.browserFolderName}
-        onInput={(e) =>
-          updateField("browserFolderName", (e.target as HTMLInputElement).value)
-        }
-      />
-      <p className="help-text">
-        Use / for nested folders. Leave empty to use the root bookmarks folder.
-      </p>
-
-      <button
-        id="testConnectionBtn"
-        className="btn-secondary"
-        onClick={handleTestConnection}
-        disabled={isTesting || isSaving}
-      >
-        {isTesting ? "Testing..." : "Test Connection"}
-      </button>
-      <button
-        id="saveBtn"
-        className="btn-primary"
-        style={{ marginTop: "8px" }}
-        onClick={handleSave}
-        disabled={isTesting || isSaving}
-      >
-        {isSaving ? "Saving..." : "Save Settings"}
-      </button>
-    </div>
+      <div className="mt-6 space-y-2">
+        <Button
+          id="testConnectionBtn"
+          variant="secondary"
+          onClick={handleTestConnection}
+          disabled={isTesting || isSaving}
+          loading={isTesting}
+        >
+          {isTesting ? "Testing..." : "Test Connection"}
+        </Button>
+        <Button
+          id="saveBtn"
+          variant="primary"
+          onClick={handleSave}
+          disabled={isTesting || isSaving}
+          loading={isSaving}
+        >
+          {isSaving ? "Saving..." : "Save Settings"}
+        </Button>
+      </div>
+    </Section>
   );
 }

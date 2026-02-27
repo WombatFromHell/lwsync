@@ -1,9 +1,9 @@
 /**
  * SyncSettingsSection Component
- * Allows updating the sync interval
  */
 
 import { useState, useEffect } from "preact/hooks";
+import { Section, Input, Button } from "../ui";
 
 export interface SyncSettingsSectionProps {
   syncInterval: number;
@@ -31,35 +31,42 @@ export function SyncSettingsSection({
   };
 
   return (
-    <div id="sync-settings-section" className="section">
-      <div className="section-title">Sync Settings</div>
-
-      <label htmlFor="syncIntervalDisplay">Sync Interval (minutes)</label>
-      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-        <input
-          type="number"
-          id="syncIntervalDisplay"
-          min="1"
-          max="60"
-          value={interval}
-          style={{ marginBottom: "0" }}
-          onInput={(e) =>
-            setInterval(parseInt((e.target as HTMLInputElement).value, 10) || 5)
-          }
-        />
-        <button
+    <Section id="sync-settings-section" title="Sync Settings">
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <Input
+            id="syncIntervalDisplay"
+            label="Sync Interval (minutes)"
+            type="number"
+            min={1}
+            max={60}
+            value={interval}
+            onInput={(e) =>
+              setInterval(
+                parseInt((e.target as HTMLInputElement).value, 10) || 5
+              )
+            }
+          />
+        </div>
+        <Button
           id="updateIntervalBtn"
-          className="btn-secondary"
-          style={{ width: "auto", padding: "8px 16px" }}
+          variant="secondary"
           onClick={handleUpdate}
           disabled={isUpdating}
+          loading={isUpdating}
+          fullWidth={false}
         >
           {isUpdating ? "Updating..." : "Update"}
-        </button>
+        </Button>
       </div>
-      <p className="help-text">
+      <p
+        className="
+          mt-[2px] mb-[14px] text-[11px] text-slate-500
+          dark:text-slate-400
+        "
+      >
         Background sync runs automatically at this interval.
       </p>
-    </div>
+    </Section>
   );
 }

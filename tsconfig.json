@@ -15,7 +15,7 @@
     "declaration": false,
     "noEmit": true,
     "resolveJsonModule": true,
-    "types": ["chrome", "webextension-polyfill", "bun", "node"],
+    "types": ["chrome", "bun", "node"],
     "typeRoots": ["./src/types", "./node_modules/@types"]
   },
   "include": ["src/**/*", "scripts/**/*", "tests/**/*"],

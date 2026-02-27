@@ -50,19 +50,24 @@ for (const dist of [DIST_CHROME, DIST_FIREFOX]) {
 
 // Build service worker for Chrome (ES module)
 console.log("📦 Building Chrome service worker...");
-await $`bun build ${SRC}/background.ts --outdir=${DIST_CHROME} --target=browser --minify --format=esm`;
+await $`bun build ${SRC}/background.ts --outdir=${DIST_CHROME} --target=browser --format=esm`;
 
 // Build background script for Firefox (ES module for MV3)
 console.log("📦 Building Firefox background script...");
-await $`bun build ${SRC}/background.ts --outdir=${DIST_FIREFOX} --target=browser --minify --format=esm`;
+await $`bun build ${SRC}/background.ts --outdir=${DIST_FIREFOX} --target=browser --format=esm`;
 
 // Build popup for Chrome
 console.log("📦 Building Chrome popup...");
-await $`bun build ${SRC}/popup.tsx --outdir=${DIST_CHROME} --target=browser --minify --format=esm`;
+await $`bun build ${SRC}/popup.tsx --outdir=${DIST_CHROME} --target=browser --format=esm`;
 
 // Build popup for Firefox
 console.log("📦 Building Firefox popup...");
-await $`bun build ${SRC}/popup.tsx --outdir=${DIST_FIREFOX} --target=browser --minify --format=esm`;
+await $`bun build ${SRC}/popup.tsx --outdir=${DIST_FIREFOX} --target=browser --format=esm`;
+
+// Build Tailwind CSS for popup
+console.log("🎨 Building Tailwind CSS...");
+await $`bunx tailwindcss -i ${SRC}/popup/styles.css -o ${DIST_CHROME}/popup.css --minify`;
+await $`bunx tailwindcss -i ${SRC}/popup/styles.css -o ${DIST_FIREFOX}/popup.css --minify`;
 
 // Copy assets with sorted ordering for determinism
 function copyAssetsSorted(sourceDir: string, destDir: string) {
@@ -70,9 +75,7 @@ function copyAssetsSorted(sourceDir: string, destDir: string) {
     .filter(
       (e) =>
         e.isFile() &&
-        (e.name.endsWith(".html") ||
-          e.name.endsWith(".png") ||
-          e.name.endsWith(".css"))
+        (e.name.endsWith(".html") || e.name.endsWith(".png"))
     )
     .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
 

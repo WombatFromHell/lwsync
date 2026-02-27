@@ -2,13 +2,13 @@
 
 **Status:** ✅ Core Implementation Complete
 
-A browser extension that bidirectionally syncs a Linkwarden collection (and subcollections) with browser bookmarks. Supports Chrome, Firefox, and Edge.
+A browser extension that bidirectionally syncs a Linkwarden collection (and subcollections) with browser bookmarks. Supports Chrome, Firefox, and Edge with Manifest V3.
 
 ---
 
 ## 1. Overview
 
-**Implementation Status:** Complete and tested (89 tests passing)
+**Implementation Status:** Complete and tested (105 tests passing)
 
 | Component | Status |
 |-----------|--------|
@@ -19,7 +19,7 @@ A browser extension that bidirectionally syncs a Linkwarden collection (and subc
 | Folder moves (bidirectional) | ✅ Complete |
 | Path-based duplicate handling | ✅ Complete |
 | Deterministic builds | ✅ Complete |
-| Cross-browser support | ⏳ Pending manual testing |
+| Cross-browser support (MV3) | ✅ Complete |
 
 ### Linkwarden API
 - **Base URL**: `{instance}/api/v1`
@@ -28,7 +28,7 @@ A browser extension that bidirectionally syncs a Linkwarden collection (and subc
 - **Collection Tree**: `GET /collections/:id` with nested subcollections
 
 ### Browser Bookmarks API
-- **Supported**: Chrome (MV3), Firefox (WebExtensions), Edge
+- **Supported**: Chrome (MV3), Firefox (MV3 128+), Edge (MV3)
 - **Structure**: Tree via `BookmarkTreeNode` (`id`, `parentId`, `title`, `url`, `children`)
 - **Events**: `onCreated`, `onRemoved`, `onChanged`, `onMoved`
 - **Permission**: `"bookmarks"` required in manifest
@@ -111,7 +111,7 @@ function resolveConflict(local: Mapping, remote: LinkwardenItem) {
 
 | Component | Technology |
 |-----------|------------|
-| Extension | Manifest V3 (Chrome), WebExtensions (Firefox) |
+| Extension | Manifest V3 (Chrome, Firefox 128+, Edge) |
 | Language | TypeScript |
 | Storage | `chrome.storage.local` + `unlimitedStorage` |
 | Bundler | Bun (`bun build`) |
@@ -132,7 +132,7 @@ lwsync/
 ├── AGENTS.md              # Quick reference
 ├── assets/
 │   ├── manifest.json      # Chrome MV3
-│   ├── manifest.firefox.json  # Firefox
+│   ├── manifest.firefox.json  # Firefox MV3 (128+)
 │   ├── popup.html         # Settings UI
 │   ├── popup.css          # Popup styles
 │   └── icon128.png        # Extension icon
@@ -141,15 +141,23 @@ lwsync/
 │   ├── build-prod.ts      # Containerized reproducible build
 │   └── zip.ts             # Package with checksums
 ├── src/
-│   ├── background.ts      # Service worker
+│   ├── background.ts      # Service worker (MV3)
 │   ├── popup.tsx          # Popup UI (Preact)
 │   ├── sync.ts            # Core sync engine
-│   ├── storage.ts         # Storage wrapper
+│   ├── storage/           # Storage wrapper
 │   ├── api.ts             # Linkwarden API client
 │   ├── bookmarks.ts       # Bookmarks API wrapper
 │   ├── browser.ts         # Browser detection
+│   ├── hooks/             # Preact hooks
+│   ├── popup/             # Popup components
+│   ├── sync/              # Sync modules
+│   ├── types/             # TypeScript types
+│   ├── utils/             # Utilities
 │   └── logger.ts          # Sync logging
 ├── tests/
+│   ├── fixtures/          # Test data factories
+│   ├── mocks/             # Mock implementations
+│   ├── utils/             # Test utilities
 │   ├── sync.test.ts       # Unit tests (pure functions)
 │   ├── api.e2e.test.ts    # API E2E (real Linkwarden)
 │   ├── sync.integration.test.ts  # Integration tests
@@ -170,7 +178,7 @@ lwsync/
 | **Phase 3** | Bidirectional sync + conflict resolution | ✅ Complete |
 | **Phase 4** | Polish (error handling, logging, deduplication, path-based matching) | ✅ Complete |
 | **Phase 5** | Build infrastructure (deterministic builds, checksums) | ✅ Complete |
-| **Pending** | Cross-browser testing (Chrome, Firefox, Edge) | ⏳ Pending |
+| **Phase 6** | Firefox MV3 migration | ✅ Complete |
 
 ---
 
@@ -220,7 +228,7 @@ lwsync/
 | Large collections cause timeout | Paginate Linkwarden requests; batch bookmark operations |
 | Circular moves in browser | Track move chains; detect loops via `isDescendantOf()` traversal |
 | Token expiration | Handle 401 responses; prompt user to refresh token |
-| Firefox MV3 compatibility | Test early; use `browser.*` namespace with polyfill |
+| Firefox MV3 compatibility | Firefox 128+ supports MV3; uses `background.scripts` instead of `service_worker` |
 | Duplicate collection names | Mapping-first strategy; path-based fallback |
 | Lost mappings (data corruption) | Recovery utility to rebuild from hierarchy |
 | 409 Conflict on link creation | Expected behavior; create mapping instead of error |
@@ -263,12 +271,14 @@ lwsync/
 
 **Rule:** Never mock the system-under-test. Only mock browser APIs that don't exist in test environment.
 
-| Test Type | File | What It Tests | Mocking |
-|-----------|------|---------------|---------|
-| **Unit** | `tests/sync.test.ts` | Pure functions (conflict, checksums, move tokens) | None |
-| **Unit** | `tests/storage.test.ts` | Storage wrapper | `chrome.storage` |
-| **API E2E** | `tests/api.e2e.test.ts` | Linkwarden API client | None (real API) |
-| **Integration** | `tests/sync.integration.test.ts` | Sync engine round-trip | Browser APIs |
+| Test Type | File | Tests | What It Tests | Mocking |
+|-----------|------|-------|---------------|---------|
+| **Unit** | `tests/sync.test.ts` | 28 | Pure functions (conflict, checksums, move tokens) | None |
+| **Unit** | `tests/storage.test.ts` | 21 | Storage wrapper | `chrome.storage` |
+| **API E2E** | `tests/api.e2e.test.ts` | 8 | Linkwarden API client | None (real API) |
+| **Integration** | `tests/sync.integration.test.ts` | 48 | Sync engine round-trip | Browser APIs |
+
+**Total:** 105 tests passing
 
 **Run:** `bun test` (all), `bun test tests/sync.test.ts` (unit only)
 

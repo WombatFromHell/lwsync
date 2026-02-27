@@ -1,10 +1,10 @@
 /**
  * StatusSection Component
- * Displays sync status and provides sync/reset actions
  */
 
 import { useState } from "preact/hooks";
 import { formatTime, formatBytes } from "../../utils/format";
+import { Section, StatusRow, Button } from "../ui";
 
 export interface StatusSectionProps {
   lastSyncTime: number | null;
@@ -45,53 +45,54 @@ export function StatusSection({
   };
 
   return (
-    <div id="status-section" className="section">
-      <div className="section-title">Sync Status</div>
+    <Section id="status-section" title="Sync Status">
+      <div
+        className="
+          mb-4 rounded-[6px] border border-slate-200 bg-slate-50 p-4
+          dark:border-slate-700 dark:bg-slate-800
+        "
+      >
+        <StatusRow
+          label="Last Sync"
+          value={formatTime(lastSyncTime)}
+          id="lastSyncTime"
+        />
+        <StatusRow
+          label="Bookmarks Synced"
+          value={mappingsCount}
+          id="mappingsCount"
+        />
+        <StatusRow
+          label="Pending Changes"
+          value={pendingChangesCount}
+          id="pendingChangesCount"
+        />
+        <StatusRow
+          label="Storage Used"
+          value={formatBytes(storageBytes)}
+          id="storageUsed"
+        />
+      </div>
 
-      <div className="status-row">
-        <span className="status-label">Last Sync</span>
-        <span className="status-value" id="lastSyncTime">
-          {formatTime(lastSyncTime)}
-        </span>
-      </div>
-      <div className="status-row">
-        <span className="status-label">Bookmarks Synced</span>
-        <span className="status-value" id="mappingsCount">
-          {mappingsCount}
-        </span>
-      </div>
-      <div className="status-row">
-        <span className="status-label">Pending Changes</span>
-        <span className="status-value" id="pendingChangesCount">
-          {pendingChangesCount}
-        </span>
-      </div>
-      <div className="status-row">
-        <span className="status-label">Storage Used</span>
-        <span className="status-value" id="storageUsed">
-          {formatBytes(storageBytes)}
-        </span>
-      </div>
-
-      <div className="button-row" style={{ marginTop: "12px" }}>
-        <button
+      <div className="flex gap-2">
+        <Button
           id="syncBtn"
-          className="btn-primary"
+          variant="primary"
           onClick={handleSync}
           disabled={syncing || isSyncing}
+          loading={syncing || isSyncing}
         >
-          {syncing || isSyncing ? (
-            <span id="syncBtnText">
-              <span className="spinner" /> Syncing...
-            </span>
-          ) : (
-            <span id="syncBtnText">Sync Now</span>
-          )}
-        </button>
-        <button id="resetBtn" className="btn-danger" onClick={handleReset}>
+          Sync Now
+        </Button>
+        <Button
+          id="resetBtn"
+          variant="danger"
+          onClick={handleReset}
+          fullWidth={false}
+        >
           Reset
-        </button>
+        </Button>
       </div>
-    </div>
+    </Section>
   );
 }

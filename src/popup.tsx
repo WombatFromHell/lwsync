@@ -1,12 +1,15 @@
 /**
  * LWSync Popup UI - Preact Implementation
  * Refactored with modular components and hooks
+ *
+ * Note: CSS is built separately with Tailwind CLI and linked in popup.html
  */
 
 import { render } from "preact";
 import { useState, useEffect, useCallback } from "preact/hooks";
 
 import { sendMessage } from "./utils/messaging";
+import type { LogEntry } from "./types/storage";
 
 // Components
 import {
@@ -203,8 +206,13 @@ function App() {
 
   return (
     <>
-      <h1>
-        <img src="icon128.png" alt="" />
+      <h1
+        className="
+          mb-4 flex items-center gap-2 text-[18px] font-semibold text-slate-900
+          dark:text-slate-100
+        "
+      >
+        <img src="icon128.png" alt="" className="size-6" />
         LWSync Settings
       </h1>
 
@@ -224,7 +232,7 @@ function App() {
           onTestConnection={handleTestConnection}
         />
       ) : (
-        <>
+        <div className="space-y-6">
           <StatusSection
             lastSyncTime={status.lastSyncTime}
             mappingsCount={status.mappingsCount}
@@ -247,10 +255,8 @@ function App() {
             onUpdateInterval={handleUpdateInterval}
           />
           <LogSection logEntries={status.syncLog} onClear={clearLog} />
-        </>
+        </div>
       )}
-
-      <div className="footer-spacer" />
     </>
   );
 }

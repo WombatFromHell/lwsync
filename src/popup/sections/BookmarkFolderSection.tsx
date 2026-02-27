@@ -1,10 +1,10 @@
 /**
  * BookmarkFolderSection Component
- * Allows updating the target browser bookmark folder
  */
 
 import { useState, useEffect } from "preact/hooks";
 import { getDefaultBrowserRootFolderName } from "../../bookmarks";
+import { Section, Input, Button } from "../ui";
 
 export interface BookmarkFolderSectionProps {
   browserFolderName: string;
@@ -33,32 +33,37 @@ export function BookmarkFolderSection({
   };
 
   return (
-    <div id="bookmark-folder-section" className="section">
-      <div className="section-title">Bookmark Folder</div>
-
-      <label htmlFor="targetFolderName">Target Bookmark Folder</label>
-      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-        <input
-          type="text"
-          id="targetFolderName"
-          placeholder="e.g. Work/Links (leave empty for root)"
-          value={folderName}
-          style={{ marginBottom: "0" }}
-          onInput={(e) => setFolderName((e.target as HTMLInputElement).value)}
-        />
-        <button
+    <Section id="bookmark-folder-section" title="Bookmark Folder">
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <Input
+            id="targetFolderName"
+            label="Target Bookmark Folder"
+            type="text"
+            placeholder="e.g. Work/Links (leave empty for root)"
+            value={folderName}
+            onInput={(e) => setFolderName((e.target as HTMLInputElement).value)}
+          />
+        </div>
+        <Button
           id="updateFolderBtn"
-          className="btn-secondary"
-          style={{ width: "auto", padding: "8px 16px" }}
+          variant="secondary"
           onClick={handleUpdate}
           disabled={isUpdating}
+          loading={isUpdating}
+          fullWidth={false}
         >
           {isUpdating ? "Updating..." : "Update"}
-        </button>
+        </Button>
       </div>
-      <p className="help-text">
+      <p
+        className="
+          mt-[2px] mb-[14px] text-[11px] text-slate-500
+          dark:text-slate-400
+        "
+      >
         Use / for nested folders. Leave empty to use the root bookmarks folder.
       </p>
-    </div>
+    </Section>
   );
 }

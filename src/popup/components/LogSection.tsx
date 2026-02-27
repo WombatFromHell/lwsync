@@ -1,9 +1,9 @@
 /**
  * LogSection Component
- * Displays sync log entries
  */
 
 import type { LogEntry } from "../../types/storage";
+import { Section, Button } from "../ui";
 
 export interface LogSectionProps {
   logEntries: LogEntry[];
@@ -15,39 +15,48 @@ export function LogSection({ logEntries, onClear }: LogSectionProps) {
     await onClear();
   };
 
+  const getColors = (type: string) => {
+    const colors: Record<string, string> = {
+      info: "text-sky-600 dark:text-sky-400",
+      success: "text-green-600 dark:text-green-400",
+      error: "text-red-600 dark:text-red-400",
+      warning: "text-amber-600 dark:text-amber-400",
+    };
+    return colors[type] || "text-slate-600 dark:text-slate-400";
+  };
+
+  const getIcon = (type: string) => {
+    const icons: Record<string, string> = {
+      info: "ℹ️",
+      success: "✅",
+      error: "❌",
+      warning: "⚠️",
+    };
+    return icons[type] || "ℹ️";
+  };
+
   return (
-    <div id="log-section" className="section">
-      <div className="section-title">
-        Sync Log
-        <button
+    <Section
+      id="log-section"
+      title="Sync Log"
+      action={
+        <Button
           id="clearLogBtn"
-          className="btn-secondary"
-          style={{
-            width: "auto",
-            padding: "2px 8px",
-            fontSize: "11px",
-            float: "right",
-          }}
+          variant="secondary"
           onClick={handleClear}
+          fullWidth={false}
+          class="px-2! py-0.5! text-xs!"
         >
           Clear
-        </button>
-      </div>
+        </Button>
+      }
+    >
       <div
-        id="syncLog"
-        style={{
-          maxHeight: "150px",
-          overflowY: "auto",
-          background: "var(--section-bg)",
-          border: "1px solid var(--border-color)",
-          borderRadius: "6px",
-          padding: "8px",
-          fontFamily: "monospace",
-          fontSize: "11px",
-          boxSizing: "border-box",
-          wordBreak: "break-word",
-          marginBottom: "8px",
-        }}
+        className="
+          mb-2 max-h-[150px] overflow-y-auto rounded-[6px] border
+          border-slate-200 bg-slate-50 p-2 font-mono text-[11px] break-all
+          dark:border-slate-700 dark:bg-slate-800
+        "
       >
         {logEntries && logEntries.length > 0 ? (
           logEntries
@@ -55,36 +64,41 @@ export function LogSection({ logEntries, onClear }: LogSectionProps) {
             .reverse()
             .map((entry, i) => {
               const time = new Date(entry.timestamp).toLocaleTimeString();
-              const colors: Record<string, string> = {
-                info: "var(--status-info-text)",
-                success: "var(--status-success-text)",
-                error: "var(--status-error-text)",
-                warning: "var(--status-warning-text, #92400e)",
-              };
-              const icons: Record<string, string> = {
-                info: "ℹ️",
-                success: "✅",
-                error: "❌",
-                warning: "⚠️",
-              };
               return (
-                <div key={i} style={{ marginBottom: "4px" }}>
-                  <span style={{ color: "var(--text-muted)" }}>[{time}]</span>
-                  <span style={{ color: colors[entry.type] }}>
-                    {icons[entry.type]}
-                  </span>
-                  <span style={{ color: "var(--text-color)" }}>
+                <div key={i} className="mb-1">
+                  <span
+                    className="
+                      text-slate-500
+                      dark:text-slate-400
+                    "
+                  >
+                    [{time}]
+                  </span>{" "}
+                  <span className={getColors(entry.type)}>
+                    {getIcon(entry.type)}
+                  </span>{" "}
+                  <span
+                    className="
+                      text-slate-900
+                      dark:text-slate-100
+                    "
+                  >
                     {entry.message}
                   </span>
                 </div>
               );
             })
         ) : (
-          <div style={{ color: "var(--text-muted)", textAlign: "center" }}>
+          <div
+            className="
+              text-center text-slate-500
+              dark:text-slate-400
+            "
+          >
             No sync activity yet
           </div>
         )}
       </div>
-    </div>
+    </Section>
   );
 }
