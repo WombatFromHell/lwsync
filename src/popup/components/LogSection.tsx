@@ -3,16 +3,33 @@
  */
 
 import type { LogEntry } from "../../types/storage";
-import { Section, Button } from "../ui";
+import { Button } from "../ui/Button";
+import { FoldingSection } from "../ui/FoldingSection";
+import { Spacer } from "../ui/Spacer";
 
 export interface LogSectionProps {
   logEntries: LogEntry[];
   onClear: () => Promise<void>;
+  onStatusUpdate?: () => Promise<void>;
+  defaultExpanded?: boolean;
+  /** Whether to hide the entire section (e.g., when unconfigured) */
+  hidden?: boolean;
 }
 
-export function LogSection({ logEntries, onClear }: LogSectionProps) {
+export function LogSection({
+  logEntries,
+  onClear,
+  onStatusUpdate,
+  defaultExpanded = false,
+  hidden = false,
+}: LogSectionProps) {
+  if (hidden) {
+    return null;
+  }
+
   const handleClear = async () => {
     await onClear();
+    await onStatusUpdate?.();
   };
 
   const getColors = (type: string) => {
@@ -36,25 +53,15 @@ export function LogSection({ logEntries, onClear }: LogSectionProps) {
   };
 
   return (
-    <Section
-      id="log-section"
+    <FoldingSection
+      sectionId="sync-log"
       title="Sync Log"
-      action={
-        <Button
-          id="clearLogBtn"
-          variant="secondary"
-          onClick={handleClear}
-          fullWidth={false}
-          class="px-2! py-0.5! text-xs!"
-        >
-          Clear
-        </Button>
-      }
+      defaultExpanded={defaultExpanded}
     >
       <div
         className="
-          mb-2 max-h-[150px] overflow-y-auto rounded-[6px] border
-          border-slate-200 bg-slate-50 p-2 font-mono text-[11px] break-all
+          max-h-40 overflow-y-auto rounded-md border border-slate-200
+          bg-slate-50 p-2
           dark:border-slate-700 dark:bg-slate-800
         "
       >
@@ -65,18 +72,25 @@ export function LogSection({ logEntries, onClear }: LogSectionProps) {
             .map((entry, i) => {
               const time = new Date(entry.timestamp).toLocaleTimeString();
               return (
-                <div key={i} className="mb-1">
+                <div
+                  key={i}
+                  className="
+                    mb-2 text-xs
+                    last:mb-0
+                  "
+                >
                   <span
                     className="
                       text-slate-500
                       dark:text-slate-400
                     "
                   >
-                    [{time}]
-                  </span>{" "}
+                    [{time}]{""}
+                  </span>
                   <span className={getColors(entry.type)}>
                     {getIcon(entry.type)}
-                  </span>{" "}
+                    {""}
+                  </span>
                   <span
                     className="
                       text-slate-900
@@ -91,7 +105,7 @@ export function LogSection({ logEntries, onClear }: LogSectionProps) {
         ) : (
           <div
             className="
-              text-center text-slate-500
+              py-6 text-center text-sm text-slate-500
               dark:text-slate-400
             "
           >
@@ -99,6 +113,20 @@ export function LogSection({ logEntries, onClear }: LogSectionProps) {
           </div>
         )}
       </div>
-    </Section>
+
+      <Spacer size="sm" />
+
+      <div className="flex justify-end">
+        <Button
+          id="clearLogBtn"
+          variant="secondary"
+          onClick={handleClear}
+          fullWidth={false}
+          className="px-2.5 py-1 text-xs font-medium"
+        >
+          Clear Log
+        </Button>
+      </div>
+    </FoldingSection>
   );
 }

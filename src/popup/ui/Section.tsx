@@ -13,11 +13,11 @@ export interface SectionProps {
 
 export function Section({ id, title, action, children }: SectionProps) {
   return (
-    <section id={id} className="mb-6">
-      <div className="mb-[10px] flex items-center justify-between">
+    <section id={id} className="mb-4">
+      <div className="mb-2 flex items-center justify-between">
         <h2
           className="
-            text-[12px] font-semibold text-slate-600 uppercase
+            text-xs font-semibold tracking-wide text-slate-500 uppercase
             dark:text-slate-400
           "
         >

@@ -14,14 +14,14 @@ export function StatusRow({ label, value, id }: StatusRowProps) {
   return (
     <div
       className="
-        flex items-center justify-between border-b border-slate-50 py-[10px]
+        flex items-center justify-between border-b border-slate-200 py-1
         last:border-b-0
-        dark:border-slate-800
+        dark:border-slate-700
       "
     >
       <span
         className="
-          text-[13px] text-slate-500
+          text-sm text-slate-500
           dark:text-slate-400
         "
       >
@@ -30,7 +30,7 @@ export function StatusRow({ label, value, id }: StatusRowProps) {
       <span
         id={id}
         className="
-          text-[13px] font-medium text-slate-900
+          text-sm font-medium text-slate-900
           dark:text-slate-100
         "
       >

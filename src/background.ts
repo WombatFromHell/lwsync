@@ -7,9 +7,9 @@ import { LinkwardenAPI } from "./api";
 import { SyncEngine } from "./sync";
 import * as storage from "./storage";
 import * as bookmarks from "./bookmarks";
-import { createLogger } from "./utils/logger";
-import { generateId, now } from "./utils/id";
+import { createLogger, generateId, now } from "./utils";
 import { getDefaultCollectionName } from "./browser";
+import { createMessageRouter } from "./utils/messageRouter";
 import type {
   ChromeMessage,
   MessageType,
@@ -251,245 +251,208 @@ function setupBookmarkListeners(): void {
  * Handle messages from popup or other parts of extension
  */
 function setupMessageListener(): void {
+  const router = createMessageRouter();
+
+  // Register message handlers
+  router.register("GET_STATUS", () =>
+    Promise.all([
+      storage.getAll(),
+      storage.getStorageUsage(),
+      storage.getSyncLog(),
+    ]).then(([data, bytes, syncLog]) => ({
+      configured: !!data.settings?.serverUrl,
+      syncing: syncEngine?.syncing || false,
+      lastSyncTime: data.sync_metadata?.lastSyncTime,
+      mappingsCount: data.mappings.length,
+      pendingChangesCount: data.pending_changes.filter(
+        (c: { resolved: boolean }) => !c.resolved
+      ).length,
+      storageBytes: bytes,
+      syncLog,
+    }))
+  );
+
+  router.register("START_SYNC", () =>
+    performSync().then(() => ({ success: true }))
+  );
+
+  router.register("SAVE_SETTINGS", (payload: SaveSettingsMessage) => {
+    logger.info("Saving settings:", payload);
+    // Ensure required fields have defaults
+    const settingsWithDefaults = {
+      serverUrl: payload.serverUrl,
+      accessToken: payload.accessToken,
+      syncInterval: payload.syncInterval,
+      targetCollectionName:
+        payload.targetCollectionName || getDefaultCollectionName(),
+      browserFolderName: payload.browserFolderName || "",
+    };
+    return storage
+      .saveSettings(settingsWithDefaults)
+      .then(() => {
+        // Clear metadata to force re-initialization with new settings
+        storage.saveSyncMetadata(null as never);
+      })
+      .then(() => initSyncEngine())
+      .then(() => {
+        void addLogEntry("info", "Settings saved");
+        return { success: true };
+      });
+  });
+
+  router.register("GET_SETTINGS", () => storage.getSettings());
+
+  router.register("TEST_CONNECTION", (payload: TestConnectionMessage) =>
+    new LinkwardenAPI(payload.serverUrl, payload.token)
+      .testConnection()
+      .then((success) => {
+        if (success) {
+          void addLogEntry("success", "Connection test passed");
+        } else {
+          void addLogEntry("error", "Connection test failed");
+        }
+        return { success };
+      })
+      .catch((err: Error) => {
+        void addLogEntry("error", `Connection test error: ${err.message}`);
+        return { success: false };
+      })
+  );
+
+  router.register("RESET_SYNC", () =>
+    syncEngine
+      ?.reset()
+      .then(() => {
+        void addLogEntry("info", "Sync reset by user");
+        // Reset in-memory state
+        syncEngine = null;
+        // Clear sync alarm
+        void chrome.alarms.clear("lwsync-sync");
+        return { success: true };
+      })
+      .catch((error: Error) => {
+        void addLogEntry("error", `Reset failed: ${error.message}`);
+        return { success: false, error: error.message };
+      })
+  );
+
+  router.register("GET_STORAGE_USAGE", () =>
+    storage.getStorageUsage().then((bytes) => ({ bytes }))
+  );
+
+  router.register("CLEAR_LOG", () =>
+    clearLog().then(() => ({ success: true }))
+  );
+
+  router.register(
+    "UPDATE_SYNC_INTERVAL",
+    (payload: UpdateSyncIntervalMessage) =>
+      storage
+        .getSettings()
+        .then((settings) => {
+          if (!settings) {
+            throw new Error("Settings not found");
+          }
+          return storage.saveSettings({
+            ...settings,
+            syncInterval: payload.syncInterval,
+          });
+        })
+        .then(() =>
+          chrome.alarms.create("lwsync-sync", {
+            periodInMinutes: payload.syncInterval,
+          })
+        )
+        .then(() => {
+          void addLogEntry(
+            "info",
+            `Sync interval updated to ${payload.syncInterval} minutes`
+          );
+          return { success: true };
+        })
+  );
+
+  router.register(
+    "UPDATE_TARGET_COLLECTION",
+    (payload: UpdateTargetCollectionMessage) =>
+      storage
+        .getSettings()
+        .then((settings) => {
+          if (!settings) {
+            throw new Error("Settings not found");
+          }
+          return storage.saveSettings({
+            ...settings,
+            targetCollectionName: payload.targetCollectionName,
+          });
+        })
+        .then(() => {
+          // Clear sync metadata to force re-initialization on next sync
+          storage.saveSyncMetadata(null as never);
+        })
+        .then(() => initSyncEngine())
+        .then(() => {
+          void addLogEntry(
+            "info",
+            `Target collection updated to "${payload.targetCollectionName}"`
+          );
+          return { success: true };
+        })
+  );
+
+  router.register(
+    "UPDATE_BROWSER_FOLDER",
+    (payload: UpdateBrowserFolderMessage) =>
+      storage
+        .getSettings()
+        .then((settings) => {
+          if (!settings) {
+            throw new Error("Settings not found");
+          }
+          return storage.saveSettings({
+            ...settings,
+            browserFolderName: payload.browserFolderName,
+          });
+        })
+        .then(() => {
+          // Clear sync metadata to force re-initialization on next sync
+          storage.saveSyncMetadata(null as never);
+        })
+        .then(() => initSyncEngine())
+        .then(() => {
+          void addLogEntry(
+            "info",
+            `Browser folder updated to "${payload.browserFolderName}"`
+          );
+          return { success: true };
+        })
+  );
+
+  // Set up the message listener with the router
   chrome.runtime.onMessage.addListener(
     (message: ChromeMessage<MessageType>, _sender, sendResponse) => {
       logger.info("Received message:", message.type);
 
-      switch (message.type) {
-        case "GET_STATUS":
-          Promise.all([
-            storage.getAll(),
-            storage.getStorageUsage(),
-            storage.getSyncLog(),
-          ]).then(([data, bytes, syncLog]) => {
-            sendResponse({
-              configured: !!data.settings?.serverUrl,
-              syncing: syncEngine?.syncing || false,
-              lastSyncTime: data.sync_metadata?.lastSyncTime,
-              mappingsCount: data.mappings.length,
-              pendingChangesCount: data.pending_changes.filter(
-                (c: { resolved: boolean }) => !c.resolved
-              ).length,
-              storageBytes: bytes,
-              syncLog,
-            });
-          });
-          return true; // Async response
+      router
+        .handle(message)
+        .then((response) => {
+          sendResponse(response);
+        })
+        .catch((error: Error) => {
+          logger.error(`Message handler error: ${message.type}`, error);
+          sendResponse({ success: false, error: error.message });
+        });
 
-        case "START_SYNC":
-          void performSync().then(() => {
-            sendResponse({ success: true });
-          });
-          return true;
-
-        case "SAVE_SETTINGS": {
-          const payload = message.payload as SaveSettingsMessage;
-          logger.info("Saving settings:", payload);
-          // Ensure required fields have defaults
-          const settingsWithDefaults = {
-            serverUrl: payload.serverUrl,
-            accessToken: payload.accessToken,
-            syncInterval: payload.syncInterval,
-            targetCollectionName:
-              payload.targetCollectionName || getDefaultCollectionName(),
-            browserFolderName: payload.browserFolderName || "",
-          };
-          void storage
-            .saveSettings(settingsWithDefaults)
-            .then(() => {
-              // Clear metadata to force re-initialization with new settings
-              return storage.saveSyncMetadata(null as never);
-            })
-            .then(() => {
-              return initSyncEngine();
-            })
-            .then(() => {
-              void addLogEntry("info", "Settings saved");
-              sendResponse({ success: true });
-            });
-          return true;
-        }
-
-        case "GET_SETTINGS":
-          void storage.getSettings().then((settings) => {
-            sendResponse(settings);
-          });
-          return true;
-
-        case "TEST_CONNECTION": {
-          const payload = message.payload as TestConnectionMessage;
-          void new LinkwardenAPI(payload.serverUrl, payload.token)
-            .testConnection()
-            .then((success) => {
-              if (success) {
-                void addLogEntry("success", "Connection test passed");
-              } else {
-                void addLogEntry("error", "Connection test failed");
-              }
-              sendResponse({ success });
-            })
-            .catch((err: Error) => {
-              void addLogEntry(
-                "error",
-                `Connection test error: ${err.message}`
-              );
-              sendResponse({ success: false });
-            });
-          return true;
-        }
-
-        case "RESET_SYNC":
-          void syncEngine
-            ?.reset()
-            .then(() => {
-              void addLogEntry("info", "Sync reset by user");
-              // Reset in-memory state
-              syncEngine = null;
-              // Clear sync alarm
-              void chrome.alarms.clear("lwsync-sync");
-              sendResponse({ success: true });
-            })
-            .catch((error: Error) => {
-              void addLogEntry("error", `Reset failed: ${error.message}`);
-              sendResponse({ success: false, error: error.message });
-            });
-          return true;
-
-        case "GET_STORAGE_USAGE":
-          void storage.getStorageUsage().then((bytes) => {
-            sendResponse({ bytes });
-          });
-          return true;
-
-        case "CLEAR_LOG":
-          void clearLog().then(() => {
-            sendResponse({ success: true });
-          });
-          return true;
-
-        case "UPDATE_SYNC_INTERVAL": {
-          const payload = message.payload as UpdateSyncIntervalMessage;
-          void storage
-            .getSettings()
-            .then((settings) => {
-              if (!settings) {
-                sendResponse({ success: false, error: "Settings not found" });
-                return;
-              }
-              return storage.saveSettings({
-                ...settings,
-                syncInterval: payload.syncInterval,
-              });
-            })
-            .then(() => {
-              // Update the alarm with new interval
-              return chrome.alarms.create("lwsync-sync", {
-                periodInMinutes: payload.syncInterval,
-              });
-            })
-            .then(() => {
-              void addLogEntry(
-                "info",
-                `Sync interval updated to ${payload.syncInterval} minutes`
-              );
-              sendResponse({ success: true });
-            })
-            .catch((error: Error) => {
-              void addLogEntry(
-                "error",
-                `Update sync interval failed: ${error.message}`
-              );
-              sendResponse({ success: false, error: error.message });
-            });
-          return true;
-        }
-
-        case "UPDATE_TARGET_COLLECTION": {
-          const payload = message.payload as UpdateTargetCollectionMessage;
-          void storage
-            .getSettings()
-            .then((settings) => {
-              if (!settings) {
-                sendResponse({ success: false, error: "Settings not found" });
-                return;
-              }
-              return storage.saveSettings({
-                ...settings,
-                targetCollectionName: payload.targetCollectionName,
-              });
-            })
-            .then(() => {
-              // Clear sync metadata to force re-initialization on next sync
-              return storage.saveSyncMetadata(null as never);
-            })
-            .then(() => {
-              // Re-initialize sync engine with new collection name
-              return initSyncEngine();
-            })
-            .then(() => {
-              void addLogEntry(
-                "info",
-                `Target collection updated to "${payload.targetCollectionName}"`
-              );
-              sendResponse({ success: true });
-            })
-            .catch((error: Error) => {
-              void addLogEntry(
-                "error",
-                `Update target collection failed: ${error.message}`
-              );
-              sendResponse({ success: false, error: error.message });
-            });
-          return true;
-        }
-
-        case "UPDATE_BROWSER_FOLDER": {
-          const payload = message.payload as UpdateBrowserFolderMessage;
-          void storage
-            .getSettings()
-            .then((settings) => {
-              if (!settings) {
-                sendResponse({ success: false, error: "Settings not found" });
-                return;
-              }
-              return storage.saveSettings({
-                ...settings,
-                browserFolderName: payload.browserFolderName,
-              });
-            })
-            .then(() => {
-              // Clear sync metadata to force re-initialization on next sync
-              return storage.saveSyncMetadata(null as never);
-            })
-            .then(() => {
-              // Re-initialize sync engine with new browser folder
-              return initSyncEngine();
-            })
-            .then(() => {
-              void addLogEntry(
-                "info",
-                `Browser folder updated to "${payload.browserFolderName}"`
-              );
-              sendResponse({ success: true });
-            })
-            .catch((error: Error) => {
-              void addLogEntry(
-                "error",
-                `Update browser folder failed: ${error.message}`
-              );
-              sendResponse({ success: false, error: error.message });
-            });
-          return true;
-        }
-      }
-
-      return false;
+      return true; // Async response
     }
   );
 }
 
 // Initialize on service worker startup
 logger.info("Service worker starting...");
+
+// Clear sync log on startup (it's for debugging recent sessions only)
+void clearLog();
 
 // Listen for sync alarm
 chrome.alarms.onAlarm.addListener((alarm) => {

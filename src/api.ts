@@ -8,8 +8,7 @@
  *   - COLLECTION: Target collection name for sync (case-sensitive)
  */
 
-import { createLogger } from "./utils/logger";
-import { getEnvVar, getEnvVarWithDefault } from "./utils/env";
+import { createLogger, getEnvVar, getEnvVarWithDefault } from "./utils";
 import {
   APIError,
   AuthError,

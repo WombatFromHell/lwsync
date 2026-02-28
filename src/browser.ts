@@ -2,7 +2,7 @@
  * Browser detection and utilities
  */
 
-import { getEnvVarWithDefault } from "./utils/env";
+import { getEnvVarWithDefault } from "./utils";
 
 export type BrowserType = "firefox" | "chrome" | "edge" | "safari" | "unknown";
 

@@ -117,6 +117,7 @@ function resolveConflict(local: Mapping, remote: LinkwardenItem) {
 | Bundler | Bun (`bun build`) |
 | Test Runner | Bun test (`bun:test`) |
 | UI Framework | Preact (popup) |
+| Styling | Tailwind CSS v4 (utility-first CSS) |
 
 ---
 
@@ -128,28 +129,35 @@ lwsync/
 ├── bunfig.toml            # Bun build config
 ├── tsconfig.json          # TypeScript config
 ├── DESIGN.md              # This document
+├── README.md              # User documentation
 ├── MEMORY.md              # Session notes
 ├── AGENTS.md              # Quick reference
 ├── assets/
 │   ├── manifest.json      # Chrome MV3
 │   ├── manifest.firefox.json  # Firefox MV3 (128+)
 │   ├── popup.html         # Settings UI
-│   ├── popup.css          # Popup styles
-│   └── icon128.png        # Extension icon
+│   └── icon*.png          # Extension icons
 ├── scripts/
 │   ├── build.ts           # Fast local build
 │   ├── build-prod.ts      # Containerized reproducible build
-│   └── zip.ts             # Package with checksums
+│   ├── zip.ts             # Package with checksums
+│   └── watch.ts           # Dev watch mode with hot-reload
 ├── src/
 │   ├── background.ts      # Service worker (MV3)
+│   ├── darkmode.ts        # Dark mode content script
 │   ├── popup.tsx          # Popup UI (Preact)
 │   ├── sync.ts            # Core sync engine
-│   ├── storage/           # Storage wrapper
 │   ├── api.ts             # Linkwarden API client
 │   ├── bookmarks.ts       # Bookmarks API wrapper
 │   ├── browser.ts         # Browser detection
+│   ├── storage/           # Storage wrapper
 │   ├── hooks/             # Preact hooks
-│   ├── popup/             # Popup components
+│   ├── popup/             # Popup modules
+│   │   ├── components/    # UI components (Button, Input, Section, etc.)
+│   │   ├── sections/      # Page sections (ServerCollection, SyncSettings, etc.)
+│   │   ├── hooks/         # Custom hooks (useSettings, useSyncStatus, etc.)
+│   │   ├── ui/            # Reusable UI primitives
+│   │   └── styles.css     # Tailwind CSS v4 styles
 │   ├── sync/              # Sync modules
 │   ├── types/             # TypeScript types
 │   ├── utils/             # Utilities
@@ -179,6 +187,7 @@ lwsync/
 | **Phase 4** | Polish (error handling, logging, deduplication, path-based matching) | ✅ Complete |
 | **Phase 5** | Build infrastructure (deterministic builds, checksums) | ✅ Complete |
 | **Phase 6** | Firefox MV3 migration | ✅ Complete |
+| **Phase 7** | UI refactoring + Tailwind CSS v4 migration | ✅ Complete |
 
 ---
 
@@ -196,6 +205,8 @@ lwsync/
 | 8 | Mapping table = source of truth | Never search by name after first sync |
 | 9 | Deduplication before creation | Check server/browser before creating |
 | 10 | Graceful 409 handling | 409 = expected, create mapping and continue |
+| 11 | Tailwind CSS v4 for styling | Utility-first CSS, minimal custom styles, fast builds |
+| 12 | Modular UI components | Refactored monolithic popup into reusable components |
 
 ---
 
@@ -254,7 +265,59 @@ lwsync/
 
 ---
 
-## 11. Sync Flow
+## 11. Tailwind CSS v4 Migration
+
+**Status:** ✅ Complete (v4.2.1)
+
+### Migration Overview
+
+The popup UI was migrated from custom CSS to Tailwind CSS v4 for improved maintainability and consistency.
+
+**Changes:**
+- Removed `popup.css` (324 lines of custom CSS)
+- Added `src/popup/styles.css` (54 lines, Tailwind imports + minimal custom styles)
+- Refactored all components to use utility-first Tailwind classes
+- Created reusable UI components (`Button`, `Input`, `Section`, `Spinner`, `StatusRow`, etc.)
+
+### Build Process
+
+CSS is built separately using Tailwind CLI and linked in `popup.html`:
+
+```bash
+# Build CSS for both targets
+bunx @tailwindcss/cli -i src/popup/styles.css -o dist/chrome/popup.css --minify
+bunx @tailwindcss/cli -i src/popup/styles.css -o dist/firefox/popup.css --minify
+```
+
+### Key Features
+
+| Feature | Implementation |
+|---------|----------------|
+| **Dark mode** | Class-based strategy (`dark` class on root) |
+| **Responsive** | Mobile-first utility classes |
+| **Custom styles** | Minimal (body dimensions, link styles, spin animation) |
+| **Hot reload** | Watch mode with CSS patching via WebSocket |
+
+### Component Structure
+
+```
+src/popup/
+├── components/     # Feature components (ConfigSection, LogSection, StatusMessage)
+├── sections/       # Page sections (ServerCollection, SyncSettings, BookmarkFolder)
+├── hooks/          # Custom hooks (useSettings, useSyncStatus, useSyncActions)
+├── ui/             # Reusable primitives (Button, Input, Section, Spinner, StatusRow)
+└── styles.css      # Tailwind CSS v4 entry point
+```
+
+**Benefits:**
+- Faster development with utility classes
+- Consistent styling across components
+- Smaller CSS bundle (minified, tree-shaken)
+- Easier maintenance and refactoring
+
+---
+
+## 13. Sync Flow
 
 **User triggers sync → Background worker:**
 1. Get pending changes from storage
@@ -267,7 +330,32 @@ lwsync/
 
 ---
 
-## 12. Testing
+## 14. Development Watch Mode
+
+**Status:** ✅ Complete
+
+Watch mode provides hot-reload for Chrome extension development:
+
+```bash
+bun run dev
+```
+
+**Features:**
+- **CSS changes** → Tailwind's `--watch` process recompiles incrementally, patches via WebSocket
+- **JS/TS changes** → Full `chrome.runtime.reload()` via WebSocket
+- **Popup survives reloads** → Open as tab (Ctrl+Shift+P) to preserve state during CSS iteration
+
+**Architecture:**
+- WebSocket server on port 35729
+- Dev code injected into `dist/chrome/background.js` and `popup.js`
+- CSS owned exclusively by Tailwind subprocess
+- JS bundling via `Bun.build()` with file watcher
+
+**See:** `scripts/watch.ts` for implementation details.
+
+---
+
+## 15. Testing
 
 **Rule:** Never mock the system-under-test. Only mock browser APIs that don't exist in test environment.
 
@@ -284,7 +372,7 @@ lwsync/
 
 ---
 
-## 13. Deterministic Builds
+## 16. Deterministic Builds
 
 **Output:** `dist/LWSync-{chrome|firefox}.zip` + `.sha256sum` checksums
 
@@ -304,7 +392,7 @@ lwsync/
 
 ---
 
-## 14. Session Notes (MEMORY.md)
+## 17. Session Notes (MEMORY.md)
 
 **Purpose:** Task-level project notebook for pause/resume without context loss.
 
@@ -318,6 +406,6 @@ lwsync/
 
 ---
 
-## 15. Reference
+## 18. Reference
 
 **Related:** `tests/TEST_DESIGN.md` - Test suite design document

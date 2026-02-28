@@ -3,15 +3,16 @@
  * Handles conflict detection and resolution between Linkwarden and browser bookmarks
  */
 
-import { computeChecksum as computeStringChecksum } from "../utils/hash";
+import { computeChecksum as computeItemChecksum } from "../utils";
 import type { ChecksumItem, ConflictResult } from "../types/sync";
 import type { Mapping } from "../types/storage";
 
 /**
  * Compute checksum for a Linkwarden item (for change detection)
+ * Re-export for backward compatibility
  */
 export function computeChecksum(item: ChecksumItem): string {
-  return computeStringChecksum(`${item.name || ""}|${item.url || ""}`);
+  return computeItemChecksum(item);
 }
 
 /**

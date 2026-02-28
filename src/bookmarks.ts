@@ -3,8 +3,13 @@
  * Provides a Promise-based interface for chrome.bookmarks
  */
 
-import { computeChecksum as computeStringChecksum } from "./utils/hash";
-import { generateId, now } from "./utils/id";
+import {
+  computeChecksum as computeStringChecksum,
+  generateId,
+  now,
+  chromePromise,
+  chromePromiseSingle,
+} from "./utils";
 import type { Mapping } from "./types/storage";
 import type { BookmarkNode } from "./types/bookmarks";
 import { detectBrowser } from "./browser";
@@ -13,61 +18,28 @@ import { detectBrowser } from "./browser";
  * Get the entire bookmarks tree
  */
 export async function getTree(): Promise<BookmarkNode[]> {
-  return new Promise((resolve, reject) => {
-    chrome.bookmarks.getTree((tree) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve(tree);
-      }
-    });
-  });
+  return chromePromise((cb) => chrome.bookmarks.getTree(cb));
 }
 
 /**
  * Get children of a specific folder
  */
 export async function getChildren(id: string): Promise<BookmarkNode[]> {
-  return new Promise((resolve, reject) => {
-    chrome.bookmarks.getChildren(id, (children) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve(children);
-      }
-    });
-  });
+  return chromePromise((cb) => chrome.bookmarks.getChildren(id, cb));
 }
 
 /**
  * Get a bookmark by ID
  */
 export async function get(id: string): Promise<BookmarkNode | undefined> {
-  const results = await new Promise<BookmarkNode[]>((resolve, reject) => {
-    chrome.bookmarks.get(id, (nodes) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve(nodes);
-      }
-    });
-  });
-  return results[0];
+  return chromePromiseSingle((cb) => chrome.bookmarks.get(id, cb));
 }
 
 /**
  * Search bookmarks by query
  */
 export async function search(query: string): Promise<BookmarkNode[]> {
-  return new Promise((resolve, reject) => {
-    chrome.bookmarks.search(query, (results) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve(results);
-      }
-    });
-  });
+  return chromePromise((cb) => chrome.bookmarks.search(query, cb));
 }
 
 /**
@@ -79,15 +51,7 @@ export async function create(details: {
   title?: string;
   url?: string;
 }): Promise<BookmarkNode> {
-  return new Promise((resolve, reject) => {
-    chrome.bookmarks.create(details, (node) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve(node);
-      }
-    });
-  });
+  return chromePromise((cb) => chrome.bookmarks.create(details, cb));
 }
 
 /**
@@ -97,45 +61,21 @@ export async function update(
   id: string,
   changes: { title?: string; url?: string }
 ): Promise<BookmarkNode> {
-  return new Promise((resolve, reject) => {
-    chrome.bookmarks.update(id, changes, (node) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve(node);
-      }
-    });
-  });
+  return chromePromise((cb) => chrome.bookmarks.update(id, changes, cb));
 }
 
 /**
  * Remove a bookmark or empty folder
  */
 export async function remove(id: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    chrome.bookmarks.remove(id, () => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve();
-      }
-    });
-  });
+  return chromePromise((cb) => chrome.bookmarks.remove(id, cb));
 }
 
 /**
  * Remove a folder and all its contents
  */
 export async function removeTree(id: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    chrome.bookmarks.removeTree(id, () => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve();
-      }
-    });
-  });
+  return chromePromise((cb) => chrome.bookmarks.removeTree(id, cb));
 }
 
 /**
@@ -145,15 +85,7 @@ export async function move(
   id: string,
   destination: { parentId?: string; index?: number }
 ): Promise<BookmarkNode> {
-  return new Promise((resolve, reject) => {
-    chrome.bookmarks.move(id, destination, (node) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve(node);
-      }
-    });
-  });
+  return chromePromise((cb) => chrome.bookmarks.move(id, destination, cb));
 }
 
 /**

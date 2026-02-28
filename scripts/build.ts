@@ -60,14 +60,22 @@ await $`bun build ${SRC}/background.ts --outdir=${DIST_FIREFOX} --target=browser
 console.log("📦 Building Chrome popup...");
 await $`bun build ${SRC}/popup.tsx --outdir=${DIST_CHROME} --target=browser --format=esm`;
 
+// Build darkmode for Chrome
+console.log("📦 Building Chrome darkmode...");
+await $`bun build ${SRC}/darkmode.ts --outdir=${DIST_CHROME} --target=browser --format=esm`;
+
 // Build popup for Firefox
 console.log("📦 Building Firefox popup...");
 await $`bun build ${SRC}/popup.tsx --outdir=${DIST_FIREFOX} --target=browser --format=esm`;
 
+// Build darkmode for Firefox
+console.log("📦 Building Firefox darkmode...");
+await $`bun build ${SRC}/darkmode.ts --outdir=${DIST_FIREFOX} --target=browser --format=esm`;
+
 // Build Tailwind CSS for popup
 console.log("🎨 Building Tailwind CSS...");
-await $`bunx tailwindcss -i ${SRC}/popup/styles.css -o ${DIST_CHROME}/popup.css --minify`;
-await $`bunx tailwindcss -i ${SRC}/popup/styles.css -o ${DIST_FIREFOX}/popup.css --minify`;
+await $`bunx @tailwindcss/cli -i ${SRC}/popup/styles.css -o ${DIST_CHROME}/popup.css --minify`;
+await $`bunx @tailwindcss/cli -i ${SRC}/popup/styles.css -o ${DIST_FIREFOX}/popup.css --minify`;
 
 // Copy assets with sorted ordering for determinism
 function copyAssetsSorted(sourceDir: string, destDir: string) {

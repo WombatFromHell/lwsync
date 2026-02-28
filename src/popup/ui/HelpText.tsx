@@ -12,7 +12,7 @@ export function HelpText({ children }: HelpTextProps) {
   return (
     <p
       className="
-        mt-[2px] mb-[14px] text-[11px] text-slate-500
+        mt-1 mb-3 text-xs text-slate-500
         dark:text-slate-400
       "
     >

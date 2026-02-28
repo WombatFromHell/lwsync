@@ -5,8 +5,7 @@
 
 import * as storage from "../storage";
 import * as bookmarks from "../bookmarks";
-import { createLogger } from "../utils/logger";
-import { generateId, now } from "../utils/id";
+import { createLogger, generateId, now } from "../utils";
 import { computeChecksum, resolveConflict } from "./conflict";
 import type { LinkwardenLink } from "../types/api";
 import type { Mapping } from "../types/storage";

@@ -27,13 +27,14 @@ export function StatusMessage({
   }, [autoDismiss, dismissDelay, onDismiss]);
 
   const base =
-    "fixed top-2 left-2 right-2 pl-3 pr-8 py-[10px] rounded-[6px] text-[13px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.15)]";
+    "sticky top-0 z-50 rounded-lg border px-4 py-3 text-sm shadow-lg";
 
   const variants = {
     success:
-      "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100",
-    error: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100",
-    info: "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-100",
+      "border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-900/80 dark:text-green-300",
+    error:
+      "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/80 dark:text-red-300",
+    info: "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-900/80 dark:text-sky-300",
   };
 
   return (
@@ -42,6 +43,7 @@ export function StatusMessage({
         ${base}
         ${variants[type]}
       `}
+      role="alert"
     >
       <div className="flex items-start justify-between gap-3">
         <span className="flex-1">{message}</span>
@@ -49,11 +51,13 @@ export function StatusMessage({
           <button
             className="
               flex size-5 shrink-0 items-center justify-center rounded-sm
-              transition-colors
+              text-slate-500 transition-colors
               hover:bg-black/10
+              dark:text-slate-400
             "
             onClick={onDismiss}
             title="Dismiss"
+            type="button"
           >
             ×
           </button>

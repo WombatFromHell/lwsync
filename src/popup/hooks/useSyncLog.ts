@@ -4,7 +4,7 @@
  */
 
 import { useCallback } from "preact/hooks";
-import { sendMessage } from "../utils/messaging";
+import { sendMessage } from "../../utils/index";
 
 export function useSyncLog() {
   const clearLog = useCallback(async () => {

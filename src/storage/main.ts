@@ -3,8 +3,9 @@
  * Provides a simple key-value interface for sync state, mappings, and pending changes
  */
 
-import { createLogger } from "../utils/logger";
+import { createLogger } from "../utils";
 import { getDefaultCollectionName } from "../browser";
+import { CONFIG, getAllStorageKeys } from "../config";
 import type {
   SyncMetadata,
   Mapping,
@@ -12,6 +13,7 @@ import type {
   LogEntry,
   Settings,
   StorageData,
+  SectionState,
 } from "../types/storage";
 export type {
   SyncMetadata,
@@ -20,6 +22,7 @@ export type {
   LogEntry,
   Settings,
   StorageData,
+  SectionState,
 } from "../types/storage";
 
 const logger = createLogger("LWSync storage");
@@ -30,6 +33,7 @@ const DEFAULT_STORAGE: StorageData = {
   pending_changes: [],
   settings: null,
   sync_log: [],
+  section_state: {},
 };
 
 /**
@@ -37,18 +41,19 @@ const DEFAULT_STORAGE: StorageData = {
  */
 export async function getAll(): Promise<StorageData> {
   return new Promise((resolve) => {
-    chrome.storage.local.get(
-      ["sync_metadata", "mappings", "pending_changes", "settings", "sync_log"],
-      (result) => {
-        resolve({
-          sync_metadata: (result.sync_metadata as SyncMetadata) || null,
-          mappings: (result.mappings as Mapping[]) || [],
-          pending_changes: (result.pending_changes as PendingChange[]) || [],
-          settings: (result.settings as Settings) || null,
-          sync_log: (result.sync_log as LogEntry[]) || [],
-        });
-      }
-    );
+    chrome.storage.local.get(getAllStorageKeys(), (result) => {
+      resolve({
+        sync_metadata:
+          (result[CONFIG.storage.KEY_SYNC_METADATA] as SyncMetadata) || null,
+        mappings: (result[CONFIG.storage.KEY_MAPPINGS] as Mapping[]) || [],
+        pending_changes:
+          (result[CONFIG.storage.KEY_PENDING_CHANGES] as PendingChange[]) || [],
+        settings: (result[CONFIG.storage.KEY_SETTINGS] as Settings) || null,
+        sync_log: (result[CONFIG.storage.KEY_SYNC_LOG] as LogEntry[]) || [],
+        section_state:
+          (result[CONFIG.storage.KEY_SECTION_STATE] as SectionState) || {},
+      });
+    });
   });
 }
 
@@ -66,11 +71,12 @@ export async function saveAll(data: StorageData): Promise<void> {
 
     chrome.storage.local.set(
       {
-        sync_metadata: data.sync_metadata,
-        mappings: data.mappings,
-        pending_changes: data.pending_changes,
-        settings: data.settings,
-        sync_log: data.sync_log,
+        [CONFIG.storage.KEY_SYNC_METADATA]: data.sync_metadata,
+        [CONFIG.storage.KEY_MAPPINGS]: data.mappings,
+        [CONFIG.storage.KEY_PENDING_CHANGES]: data.pending_changes,
+        [CONFIG.storage.KEY_SETTINGS]: data.settings,
+        [CONFIG.storage.KEY_SYNC_LOG]: data.sync_log,
+        [CONFIG.storage.KEY_SECTION_STATE]: data.section_state,
       },
       () => {
         if (chrome.runtime.lastError) {
@@ -249,7 +255,7 @@ export async function getStorageUsage(): Promise<number> {
   });
 }
 
-const MAX_LOG_ENTRIES = 100;
+const MAX_LOG_ENTRIES = CONFIG.sync.MAX_LOG_ENTRIES;
 
 /**
  * Get sync log
@@ -288,4 +294,34 @@ export async function clearSyncLog(): Promise<void> {
   const data = await getAll();
   data.sync_log = [];
   await saveAll(data);
+}
+
+/**
+ * Get section collapse/expand state
+ */
+export async function getSectionState(): Promise<SectionState> {
+  const data = await getAll();
+  return data.section_state || {};
+}
+
+/**
+ * Save section collapse/expand state
+ */
+export async function saveSectionState(state: SectionState): Promise<void> {
+  const data = await getAll();
+  data.section_state = state;
+  await saveAll(data);
+}
+
+/**
+ * Toggle section expand/collapse state
+ */
+export async function toggleSection(sectionId: string): Promise<boolean> {
+  const data = await getAll();
+  const currentState = data.section_state || {};
+  const newState = !currentState[sectionId];
+  currentState[sectionId] = newState;
+  data.section_state = currentState;
+  await saveAll(data);
+  return newState;
 }

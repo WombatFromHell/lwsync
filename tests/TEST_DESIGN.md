@@ -1,7 +1,7 @@
 # Test Suite Design Document
 
 **Status:** ✅ Complete (105 tests passing)
-**Last Updated:** 2026-02-25
+**Last Updated:** 2026-02-27
 
 Comprehensive test suite for the Linkwarden sync extension using Bun's test runner.
 
@@ -25,6 +25,11 @@ bun test tests/storage.test.ts        # Storage tests only
 bun test tests/api.e2e.test.ts        # API E2E only
 bun test tests/sync.integration.test.ts  # Integration only
 ```
+
+**Recent Changes:**
+- ✅ Test suite streamlined (2026-02-25)
+- ✅ Monolithic modules refactored into logical modules
+- ✅ All 105 tests passing
 
 ---
 
@@ -504,6 +509,84 @@ test("should handle unique data", async () => {
 ## 8. Related Documents
 
 - `PLAN.md` - Test mocks centralization plan
-- `DESIGN.md` - System architecture and design decisions
+- `DESIGN.md` - System architecture and design decisions (includes Tailwind CSS v4 migration)
 - `AGENTS.md` - Quick reference for development commands
 - `MEMORY.md` - Current session notes and progress
+- `README.md` - User documentation and privacy policy
+
+---
+
+## 9. UI Component Testing
+
+**Status:** Manual testing via watch mode
+
+### Current Approach
+
+UI components built with Tailwind CSS v4 are tested manually during development:
+
+```bash
+bun run dev  # Watch mode with hot-reload
+```
+
+**Why Manual Testing:**
+- UI is simple (popup with ~400px width)
+- Visual changes are immediately visible in browser
+- Tailwind utility classes reduce styling bugs
+- Components use Preact with hooks (easy to reason about)
+
+### Component Structure
+
+```
+src/popup/
+├── ui/             # Reusable primitives (Button, Input, Section, Spinner, StatusRow)
+├── components/     # Feature components (ConfigSection, LogSection, StatusMessage)
+├── sections/       # Page sections (ServerCollection, SyncSettings, BookmarkFolder)
+└── hooks/          # Custom hooks (useSettings, useSyncStatus, useSyncActions)
+```
+
+### Future Testing Opportunities
+
+If UI complexity increases, consider adding:
+
+| Test Type | Tool | Purpose |
+|-----------|------|---------|
+| **Component tests** | `@testing-library/preact` | Test component rendering, interactions |
+| **Visual regression** | `playwright` | Screenshot comparison for UI changes |
+| **E2E tests** | `playwright` | Full popup interaction flows |
+| **Accessibility** | `axe-core` | A11y compliance checks |
+
+**Decision:** Keep manual testing for now. Add automated UI tests if:
+- Component count grows significantly
+- Visual regression issues reported
+- Accessibility compliance required
+
+---
+
+## 10. Tailwind CSS v4 Testing
+
+**Build Verification:**
+
+CSS is built separately and verified visually:
+
+```bash
+# Build CSS
+bunx @tailwindcss/cli -i src/popup/styles.css -o dist/chrome/popup.css --minify
+
+# Load dist/chrome/ as unpacked extension
+# Manually verify popup rendering, dark mode, responsiveness
+```
+
+**What to Check:**
+- ✅ All components render correctly
+- ✅ Dark mode works (if enabled)
+- ✅ No console errors
+- ✅ Responsive layout fits popup dimensions (425x400-650px)
+- ✅ Buttons, inputs, sections have consistent styling
+
+**Deterministic Builds:**
+
+CSS builds are deterministic (same input → same output):
+
+```bash
+bun run verify  # Verify checksums
+```

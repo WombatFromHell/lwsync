@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback } from "preact/hooks";
-import { sendMessage } from "../utils/messaging";
+import { sendMessage } from "../../utils/index";
 
 export interface SyncStatus {
   configured: boolean;

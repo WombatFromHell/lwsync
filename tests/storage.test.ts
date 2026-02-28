@@ -61,6 +61,10 @@ describe("Storage: getAll/saveAll", () => {
           message: "Test log entry",
         },
       ],
+      section_state: {
+        "server-config": true,
+        "common-settings": false,
+      },
     };
 
     await storage.saveAll(testData);
@@ -70,6 +74,7 @@ describe("Storage: getAll/saveAll", () => {
     expect(retrieved.mappings).toEqual(testData.mappings);
     expect(retrieved.settings).toEqual(testData.settings);
     expect(retrieved.sync_log).toEqual(testData.sync_log);
+    expect(retrieved.section_state).toEqual(testData.section_state);
   });
 });
 

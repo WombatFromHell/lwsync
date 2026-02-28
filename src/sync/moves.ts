@@ -4,12 +4,13 @@
  * Token format: "{LW:MOVE:{"to":parentId,"ts":timestamp}}"
  */
 
+import { CONFIG } from "../config";
 import type { MoveToken } from "../types/sync";
 import type { BookmarkNode } from "../types/bookmarks";
 import * as bookmarks from "../bookmarks";
 
-const MOVE_TOKEN_PREFIX = "{LW:MOVE:";
-const MOVE_TOKEN_SUFFIX = "}";
+const { PREFIX: MOVE_TOKEN_PREFIX, SUFFIX: MOVE_TOKEN_SUFFIX } =
+  CONFIG.moveTokens;
 
 /**
  * Append move token to collection description

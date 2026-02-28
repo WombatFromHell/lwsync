@@ -3,8 +3,11 @@
  */
 
 import { useState } from "preact/hooks";
-import { formatTime, formatBytes } from "../../utils/format";
-import { Section, StatusRow, Button } from "../ui";
+import { formatTime, formatBytes } from "../../utils";
+import { StatusRow } from "../ui/StatusRow";
+import { Button } from "../ui/Button";
+import { Spacer } from "../ui/Spacer";
+import { FoldingSection } from "../ui/FoldingSection";
 
 export interface StatusSectionProps {
   lastSyncTime: number | null;
@@ -12,8 +15,10 @@ export interface StatusSectionProps {
   pendingChangesCount: number;
   storageBytes: number;
   syncing: boolean;
-  onSync: () => Promise<void>;
-  onReset: () => Promise<void>;
+  onSync: () => Promise<void | boolean>;
+  onReset: () => Promise<void | boolean>;
+  disabled?: boolean;
+  defaultExpanded?: boolean;
 }
 
 export function StatusSection({
@@ -24,6 +29,8 @@ export function StatusSection({
   syncing,
   onSync,
   onReset,
+  disabled = false,
+  defaultExpanded = true,
 }: StatusSectionProps) {
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -45,10 +52,14 @@ export function StatusSection({
   };
 
   return (
-    <Section id="status-section" title="Sync Status">
+    <FoldingSection
+      sectionId="sync-status"
+      title="Sync Status"
+      defaultExpanded={defaultExpanded}
+    >
       <div
         className="
-          mb-4 rounded-[6px] border border-slate-200 bg-slate-50 p-4
+          rounded-md border border-slate-200 bg-slate-50 p-3
           dark:border-slate-700 dark:bg-slate-800
         "
       >
@@ -74,25 +85,27 @@ export function StatusSection({
         />
       </div>
 
-      <div className="flex gap-2">
+      <Spacer size="md" />
+
+      <div className="flex flex-col gap-2">
         <Button
           id="syncBtn"
           variant="primary"
           onClick={handleSync}
-          disabled={syncing || isSyncing}
+          disabled={disabled || syncing || isSyncing}
           loading={syncing || isSyncing}
         >
-          Sync Now
+          {syncing || isSyncing ? "Syncing..." : "Sync Now"}
         </Button>
         <Button
           id="resetBtn"
           variant="danger"
           onClick={handleReset}
-          fullWidth={false}
+          disabled={disabled}
         >
-          Reset
+          Reset Sync Data
         </Button>
       </div>
-    </Section>
+    </FoldingSection>
   );
 }

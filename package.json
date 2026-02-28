@@ -11,7 +11,7 @@
     "quality": "bun run lint && bun run format",
     "build": "bun run quality && bun run scripts/build.ts",
     "build:prod": "rm -rf dist/ && bun run scripts/build-prod.ts",
-    "dev": "bun run scripts/build.ts --watch",
+    "dev": "bun run scripts/watch.ts",
     "zip": "bun run scripts/zip.ts",
     "verify": "bun run scripts/verify.ts",
     "package": "bun run build && bun run zip",

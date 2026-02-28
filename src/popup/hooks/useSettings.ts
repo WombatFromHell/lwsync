@@ -4,9 +4,9 @@
  */
 
 import { useState, useCallback } from "preact/hooks";
-import { sendMessage } from "../utils/messaging";
-import { getDefaultCollectionName } from "../browser";
-import type { Settings } from "../types/storage";
+import { sendMessage } from "../../utils/index";
+import { getDefaultCollectionName } from "../../browser";
+import type { Settings } from "../../types/storage";
 
 export function useSettings() {
   const [settings, setSettings] = useState<Settings>({

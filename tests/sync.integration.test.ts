@@ -80,6 +80,30 @@ function getMockBookmarksProxy(mocks: ReturnType<typeof setupBrowserMocks>) {
   );
 }
 
+/**
+ * Helper to recursively get all bookmarks from a tree node
+ */
+async function getAllBookmarks(
+  node: chrome.bookmarks.BookmarkTreeNode
+): Promise<chrome.bookmarks.BookmarkTreeNode[]> {
+  const bookmarks: chrome.bookmarks.BookmarkTreeNode[] = [];
+
+  function traverse(n: chrome.bookmarks.BookmarkTreeNode) {
+    // Skip folders (no URL), only collect actual bookmarks
+    if (n.url) {
+      bookmarks.push(n);
+    }
+    if (n.children) {
+      for (const child of n.children) {
+        traverse(child);
+      }
+    }
+  }
+
+  traverse(node);
+  return bookmarks;
+}
+
 describe("Integration: SyncEngine", () => {
   let syncEngine: SyncEngine;
 
@@ -120,7 +144,10 @@ describe("Integration: SyncEngine", () => {
         expect(result.errors).toHaveLength(0);
 
         const mappings = await storage.getMappings();
-        expect(mappings.length).toBe(2);
+        const linkMappings = mappings.filter(
+          (m) => m.linkwardenType === "link"
+        );
+        expect(linkMappings.length).toBe(2);
       },
       TEST_TIMEOUT
     );
@@ -488,8 +515,11 @@ describe("Round-Trip Sync Scenarios", () => {
         expect(result.errors).toHaveLength(0);
 
         const mappings = await storage.getMappings();
-        expect(mappings.length).toBe(1);
-        expect(mappings[0].linkwardenType).toBe("link");
+        const linkMappings = mappings.filter(
+          (m) => m.linkwardenType === "link"
+        );
+        expect(linkMappings.length).toBe(1);
+        expect(linkMappings[0].linkwardenType).toBe("link");
       },
       TEST_TIMEOUT
     );
@@ -618,6 +648,195 @@ describe("Round-Trip Sync Scenarios", () => {
     );
   });
 
+  describe("Orphan Cleanup", () => {
+    test(
+      "should cleanup orphaned mappings when links are deleted from Linkwarden",
+      async () => {
+        // Create links in Linkwarden
+        const link1 = await mockApi.createLink(
+          "https://keep-me.com",
+          1,
+          "Keep Me"
+        );
+        const link2 = await mockApi.createLink(
+          "https://delete-me.com",
+          1,
+          "Delete Me"
+        );
+
+        await storage.saveSyncMetadata({
+          id: "sync_state",
+          lastSyncTime: 0,
+          syncDirection: "bidirectional",
+          targetCollectionId: 1,
+          browserRootFolderId: "2",
+        });
+
+        // Sync to create mappings and browser bookmarks
+        const result1 = await syncEngine.sync();
+        expect(result1.errors).toHaveLength(0);
+        expect(result1.created).toBe(2);
+
+        // Verify mappings exist
+        let mappings = await storage.getMappings();
+        let linkMappings = mappings.filter((m) => m.linkwardenType === "link");
+        expect(linkMappings.length).toBe(2);
+
+        // Verify browser bookmarks exist
+        let browserTree = await mocks.bookmarks.getTree();
+        let browserBookmarks = await getAllBookmarks(browserTree[0]);
+        expect(browserBookmarks.length).toBe(2);
+
+        // Delete link2 directly from Linkwarden (simulating user action outside sync)
+        await mockApi.deleteLink(link2.id);
+
+        // Verify link is gone from server
+        let serverLinks = await mockApi.getCollectionLinks(1);
+        expect(serverLinks.find((l) => l.id === link2.id)).toBeUndefined();
+        expect(serverLinks.length).toBe(1);
+
+        // Sync again - should cleanup orphaned mapping and browser bookmark
+        const result2 = await syncEngine.sync();
+        expect(result2.errors).toHaveLength(0);
+
+        // Verify orphaned mapping was removed
+        mappings = await storage.getMappings();
+        linkMappings = mappings.filter((m) => m.linkwardenType === "link");
+        expect(linkMappings.length).toBe(1);
+        expect(linkMappings[0].linkwardenId).toBe(link1.id);
+
+        // Verify orphaned browser bookmark was removed
+        browserTree = await mocks.bookmarks.getTree();
+        browserBookmarks = await getAllBookmarks(browserTree[0]);
+        expect(browserBookmarks.length).toBe(1);
+      },
+      TEST_TIMEOUT
+    );
+
+    test(
+      "should cleanup orphaned collection mappings when subcollections are deleted",
+      async () => {
+        // Create parent collection with subcollection
+        const parentCollection =
+          await mockApi.createCollection("Parent Collection");
+        const childCollection = await mockApi.createCollection(
+          "Child Collection",
+          parentCollection.id
+        );
+
+        // Add a link to child collection
+        await mockApi.createLink(
+          "https://child-link.com",
+          childCollection.id,
+          "Child Link"
+        );
+
+        await storage.saveSyncMetadata({
+          id: "sync_state",
+          lastSyncTime: 0,
+          syncDirection: "bidirectional",
+          targetCollectionId: parentCollection.id,
+          browserRootFolderId: "2",
+        });
+
+        // Sync to create mappings
+        const result1 = await syncEngine.sync();
+        expect(result1.errors).toHaveLength(0);
+
+        // Verify collection mappings exist
+        let mappings = await storage.getMappings();
+        let collectionMappings = mappings.filter(
+          (m) => m.linkwardenType === "collection"
+        );
+        expect(collectionMappings.length).toBe(2); // Parent + Child collection
+
+        // Delete child collection directly from Linkwarden
+        await mockApi.deleteCollection(childCollection.id);
+
+        // Sync again - should cleanup orphaned collection mapping
+        const result2 = await syncEngine.sync();
+        expect(result2.errors).toHaveLength(0);
+
+        // Verify orphaned collection mapping was removed
+        mappings = await storage.getMappings();
+        collectionMappings = mappings.filter(
+          (m) => m.linkwardenType === "collection"
+        );
+        expect(collectionMappings.length).toBe(1); // Only parent remains
+      },
+      TEST_TIMEOUT
+    );
+
+    test(
+      "should not delete browser bookmarks outside sync root folder",
+      async () => {
+        // Create a link in Linkwarden
+        const link = await mockApi.createLink(
+          "https://test.com",
+          1,
+          "Test Link"
+        );
+
+        await storage.saveSyncMetadata({
+          id: "sync_state",
+          lastSyncTime: 0,
+          syncDirection: "bidirectional",
+          targetCollectionId: 1,
+          browserRootFolderId: "2",
+        });
+
+        // Sync to create mapping and browser bookmark
+        const result1 = await syncEngine.sync();
+        expect(result1.errors).toHaveLength(0);
+
+        // Create a manual bookmark outside sync root (under Other Bookmarks)
+        const manualBookmark =
+          await new Promise<chrome.bookmarks.BookmarkTreeNode>((resolve) => {
+            chrome.bookmarks.create(
+              {
+                parentId: "1", // Other Bookmarks
+                title: "Manual Bookmark",
+                url: "https://manual.com",
+              },
+              resolve
+            );
+          });
+
+        // Create an orphaned mapping for the manual bookmark (simulating corruption)
+        await storage.upsertMapping({
+          id: "orphan-mapping",
+          linkwardenType: "link",
+          linkwardenId: 99999, // Non-existent link
+          browserId: manualBookmark.id,
+          linkwardenUpdatedAt: Date.now(),
+          browserUpdatedAt: Date.now(),
+          lastSyncedAt: Date.now(),
+          checksum: "fake-checksum",
+        });
+
+        // Delete the link from Linkwarden
+        await mockApi.deleteLink(link.id);
+
+        // Sync again - should cleanup orphaned mapping but NOT delete manual bookmark
+        const result2 = await syncEngine.sync();
+        expect(result2.errors).toHaveLength(0);
+
+        // Verify mapping was removed
+        const mappings = await storage.getMappings();
+        expect(mappings.find((m) => m.id === "orphan-mapping")).toBeUndefined();
+
+        // Verify manual bookmark still exists (it's outside sync root)
+        const manualExists = await new Promise<boolean>((resolve) => {
+          chrome.bookmarks.get(manualBookmark.id, (nodes) => {
+            resolve(nodes.length > 0);
+          });
+        });
+        expect(manualExists).toBe(true);
+      },
+      TEST_TIMEOUT
+    );
+  });
+
   describe("Subcollections and Folders", () => {
     test(
       "should sync subcollections as nested folders",
@@ -662,7 +881,7 @@ describe("Round-Trip Sync Scenarios", () => {
           (m) => m.linkwardenType === "link"
         );
 
-        expect(collectionMappings.length).toBe(1); // Child collection (parent is root)
+        expect(collectionMappings.length).toBe(2); // Parent + Child collection
         expect(linkMappings.length).toBe(2); // One in parent, one in child
       },
       TEST_TIMEOUT
@@ -798,8 +1017,11 @@ describe("Round-Trip Sync Scenarios", () => {
         expect(result.errors).toHaveLength(0);
 
         const mappings = await storage.getMappings();
-        expect(mappings.length).toBe(1);
-        const browserId = mappings[0].browserId;
+        const linkMappings = mappings.filter(
+          (m) => m.linkwardenType === "link"
+        );
+        expect(linkMappings.length).toBe(1);
+        const browserId = linkMappings[0].browserId;
 
         // Step 3: Update browser bookmark (simulate user edit)
         await storage.addPendingChange({
@@ -1030,17 +1252,17 @@ describe("Round-Trip Sync Scenarios", () => {
           browserRootFolderId: "2",
         });
 
-        // Create mapping for child folder
-        await storage.upsertMapping({
-          id: "mapping-folder-1",
-          linkwardenType: "collection",
-          linkwardenId: childCollection.id,
-          browserId: "browser-folder-1",
-          linkwardenUpdatedAt: new Date(childCollection.updatedAt).getTime(),
-          browserUpdatedAt: Date.now(),
-          lastSyncedAt: Date.now(),
-          checksum: computeChecksum({ name: childCollection.name }),
-        });
+        // First sync to create the folder structure
+        await syncEngine.sync();
+
+        // Get the mapping for the child folder
+        const mappings = await storage.getMappings();
+        const childMapping = mappings.find(
+          (m) =>
+            m.linkwardenId === childCollection.id &&
+            m.linkwardenType === "collection"
+        );
+        expect(childMapping).toBeDefined();
 
         // Simulate folder rename via pending change
         await storage.addPendingChange({
@@ -1048,7 +1270,7 @@ describe("Round-Trip Sync Scenarios", () => {
           type: "update",
           source: "browser",
           linkwardenId: childCollection.id,
-          browserId: "browser-folder-1",
+          browserId: childMapping!.browserId,
           data: {
             title: "Renamed Folder",
           },
@@ -1795,7 +2017,10 @@ describe("Round-Trip Sync Scenarios", () => {
         expect(result.created).toBe(100);
 
         const mappings = await storage.getMappings();
-        expect(mappings.length).toBe(100);
+        const linkMappings = mappings.filter(
+          (m) => m.linkwardenType === "link"
+        );
+        expect(linkMappings.length).toBe(100);
       },
       TEST_TIMEOUT
     );

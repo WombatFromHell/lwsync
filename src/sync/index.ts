@@ -1,15 +1,30 @@
 /**
  * Sync Module Barrel Exports
  *
- * Note: Main sync engine remains in src/sync.ts for backward compatibility.
- * New modular components are available for future extraction.
+ * Modular sync components for maintainability and testability.
+ * Main SyncEngine available from engine.ts.
  */
 
-// Conflict resolution (new module)
+// Core engine (includes SyncStats inline)
+export { SyncEngine } from "./engine";
+export type { SyncStatsObject, SyncStatType } from "./engine";
+
+// Sync modules
+export { BrowserChangeApplier } from "./browser-changes";
+export { RemoteSync } from "./remote-sync";
+export { CollectionSync } from "./collections";
+export { SyncInitializer } from "./initialization";
+export { OrphanCleanup } from "./orphans";
+
+// Utilities
+export { SyncErrorReporter, createErrorContext } from "./errorReporter";
+export type { ErrorEntry, ErrorContext } from "./errorReporter";
+
+// Conflict resolution
 export { computeChecksum, resolveConflict } from "./conflict";
 export type { ConflictResult, ChecksumItem } from "../types/sync";
 
-// Move token handling (new module)
+// Move token handling
 export {
   appendMoveToken,
   extractMoveToken,
@@ -18,7 +33,7 @@ export {
 } from "./moves";
 export type { MoveToken } from "../types/sync";
 
-// Mapping and cache operations (new module)
+// Mapping and cache operations
 export {
   buildPath,
   buildBrowserPath,
@@ -28,11 +43,11 @@ export {
   buildBookmarksCache,
 } from "./mappings";
 
-// Link sync (new module)
+// Path utilities (re-export for tests)
+export { parseFolderPath } from "../utils";
+
+// Link sync
 export { syncLink } from "./links";
 
 // Sync result type
 export type { SyncResult } from "../types/sync";
-
-// Re-export main engine for backward compatibility
-export { SyncEngine } from "../sync";

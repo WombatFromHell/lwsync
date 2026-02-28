@@ -3,6 +3,9 @@
  * Type definitions for chrome.storage.local schema
  */
 
+// Re-export storage keys from config for backward compatibility
+export { StorageKey, getAllStorageKeys } from "../config";
+
 export interface SyncMetadata {
   id: "sync_state";
   lastSyncTime: number;
@@ -48,10 +51,15 @@ export interface Settings {
   browserFolderName: string;
 }
 
+export interface SectionState {
+  [key: string]: boolean; // sectionId: isExpanded
+}
+
 export interface StorageData {
   sync_metadata: SyncMetadata | null;
   mappings: Mapping[];
   pending_changes: PendingChange[];
   settings: Settings | null;
   sync_log: LogEntry[];
+  section_state: SectionState | null;
 }
