@@ -164,18 +164,18 @@ export class LinkwardenAPI {
 
   /**
    * Get links for a specific collection
-   * Uses /api/v1/links?collectionId=:id endpoint
+   * @deprecated Use getLinksByCollection() instead - uses /api/v1/search endpoint
    */
   async getCollectionLinks(collectionId: number): Promise<LinkwardenLink[]> {
-    const links = await this.request<LinkwardenLink[]>(
-      `/links?collectionId=${collectionId}`
+    logger.warn(
+      "getCollectionLinks is deprecated, use getLinksByCollection() instead"
     );
-    logger.debug("Got", links.length, "links for collection", collectionId);
-    return links;
+    return this.getLinksByCollection(collectionId);
   }
 
   /**
    * Get a collection tree recursively (collection with all subcollections and links)
+   * Uses optimized getLinksByCollection() endpoint for fetching links
    */
   async getCollectionTree(id: number): Promise<LinkwardenCollection> {
     logger.debug("Fetching collection tree for ID:", id);
@@ -188,8 +188,8 @@ export class LinkwardenAPI {
       collectionsCount: collection.collections?.length || 0,
     });
 
-    // Fetch links separately using the collectionId filter
-    const links = await this.getCollectionLinks(id);
+    // Fetch links using optimized search endpoint
+    const links = await this.getLinksByCollection(id);
     collection.links = links;
 
     // Fetch ALL collections and filter for subcollections of this one
@@ -208,7 +208,7 @@ export class LinkwardenAPI {
 
     if (subCollections.length > 0) {
       logger.debug("Found", subCollections.length, "subcollections");
-      // Fetch full tree for each subcollection
+      // Fetch full tree for each subcollection (recursive)
       collection.collections = await Promise.all(
         subCollections.map((sc) => this.getCollectionTree(sc.id))
       );
@@ -349,6 +349,101 @@ export class LinkwardenAPI {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Get links by collection with pagination support
+   * Uses GET /api/v1/search?collectionId=:id&cursor=:num
+   * Handles large collections by fetching all pages
+   *
+   * Note: Uses retry logic for eventual consistency (search index may lag)
+   */
+  async getLinksByCollection(collectionId: number): Promise<LinkwardenLink[]> {
+    logger.debug("Fetching links for collection:", collectionId);
+
+    const maxRetries = 3;
+    const retryDelay = 100; // ms
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const allLinks: LinkwardenLink[] = [];
+        let cursor: number | undefined = 0;
+
+        while (cursor !== undefined) {
+          const responseData: unknown = await this.request(
+            `/search?collectionId=${collectionId}&cursor=${cursor}`
+          );
+
+          // Handle different response formats
+          let links: LinkwardenLink[] = [];
+          let nextCursor: number | null | undefined;
+
+          if (
+            responseData &&
+            typeof responseData === "object" &&
+            "data" in responseData &&
+            responseData.data &&
+            typeof responseData.data === "object" &&
+            "links" in responseData.data
+          ) {
+            // Format: { data: { links: [], nextCursor: number } }
+            const data = responseData.data as {
+              links: LinkwardenLink[];
+              nextCursor?: number | null;
+            };
+            links = data.links;
+            nextCursor = data.nextCursor;
+          } else if (
+            responseData &&
+            typeof responseData === "object" &&
+            "links" in responseData
+          ) {
+            // Format: { links: [], nextCursor: number }
+            const data = responseData as {
+              links: LinkwardenLink[];
+              nextCursor?: number | null;
+            };
+            links = data.links;
+            nextCursor = data.nextCursor;
+          } else if (Array.isArray(responseData)) {
+            // Format: []
+            links = responseData;
+            nextCursor = undefined;
+          }
+
+          allLinks.push(...links);
+
+          // Continue if there's a next cursor
+          cursor = nextCursor ?? undefined;
+        }
+
+        logger.debug(
+          "Fetched links via /search for collection:",
+          collectionId,
+          "count:",
+          allLinks.length
+        );
+        return allLinks;
+      } catch (error) {
+        // Retry on transient errors
+        if (attempt < maxRetries) {
+          logger.debug(
+            `Search attempt ${attempt} failed, retrying in ${retryDelay}ms:`,
+            error instanceof Error ? error.message : String(error)
+          );
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        } else {
+          logger.error(
+            "Failed to fetch links via /search after retries:",
+            collectionId,
+            error
+          );
+          return [];
+        }
+      }
+    }
+
+    return [];
   }
 }
 

@@ -37,9 +37,12 @@ export interface MessageMap {
   RESET_SYNC: never;
   GET_STORAGE_USAGE: never;
   CLEAR_LOG: never;
+  EXPORT_LOGS: never;
   UPDATE_SYNC_INTERVAL: UpdateSyncIntervalMessage;
   UPDATE_TARGET_COLLECTION: UpdateTargetCollectionMessage;
   UPDATE_BROWSER_FOLDER: UpdateBrowserFolderMessage;
+  COMPARE_SYNC: never;
+  GET_DIAGNOSTICS: never;
 }
 
 export type MessageType = keyof MessageMap;
@@ -47,4 +50,21 @@ export type MessageType = keyof MessageMap;
 export interface ChromeMessage<T extends MessageType> {
   type: T;
   payload?: MessageMap[T];
+}
+
+export interface DiagnosticsResult {
+  settings: {
+    serverUrl: string;
+    targetCollectionName: string;
+    browserFolderName: string;
+    syncInterval: number;
+  };
+  metadata:
+    | {
+        targetCollectionId: number;
+        browserRootFolderId: string;
+        lastSyncTime: string;
+      }
+    | string;
+  issue: string;
 }

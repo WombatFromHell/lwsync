@@ -1,7 +1,7 @@
 # Test Suite Design Document
 
-**Status:** ✅ Complete (105 tests passing)
-**Last Updated:** 2026-02-27
+**Status:** ✅ Complete (134 tests passing = 100%)
+**Last Updated:** 2026-03-05
 
 Comprehensive test suite for the Linkwarden sync extension using Bun's test runner.
 
@@ -11,25 +11,36 @@ Comprehensive test suite for the Linkwarden sync extension using Bun's test runn
 
 | Metric          | Value                  |
 | --------------- | ---------------------- |
-| **Total Tests** | 105                    |
-| **Test Files**  | 4                      |
+| **Total Tests** | 134                    |
+| **Test Files**  | 5                      |
 | **Framework**   | Bun test (`bun:test`)  |
 | **Coverage**    | Unit, Integration, E2E |
+| **Pass Rate**   | 100% (134/134)         |
 
 **Run Commands:**
 
 ```bash
 bun test                              # All tests
-bun test tests/sync.test.ts           # Unit tests only
-bun test tests/storage.test.ts        # Storage tests only
-bun test tests/api.e2e.test.ts        # API E2E only
-bun test tests/sync.integration.test.ts  # Integration only
+bun test tests/sync.test.ts           # Unit tests only (28 tests)
+bun test tests/storage.test.ts        # Storage tests only (21 tests)
+bun test tests/api.e2e.test.ts        # API E2E only (8 tests)
+bun test tests/sync.integration.test.ts  # Integration only (52 tests)
+bun test tests/bookmark-order.test.ts # Order preservation only (13 tests)
 ```
 
+**Test Configuration:**
+
+All tests use `TEST_COLLECTION` from environment variables (default: 114 "Unorganized").
+Set via `.env` file or environment variable.
+
 **Recent Changes:**
-- ✅ Test suite streamlined (2026-02-25)
-- ✅ Monolithic modules refactored into logical modules
-- ✅ All 105 tests passing
+
+- ✅ Refactored mocks to use `TEST_COLLECTION` from env (2026-03-04)
+- ✅ Added test configuration utilities (`tests/utils/config.ts`)
+- ✅ Updated all fixtures to use dynamic collection IDs
+- ✅ Removed bulk operations tests (undocumented API endpoints)
+- ✅ Added retry logic tests for `/search` eventual consistency
+- ✅ All 134 tests passing (100%)
 
 ---
 
@@ -56,23 +67,53 @@ tests/
 │   ├── mapping.ts          # Mapping factory
 │   ├── metadata.ts         # SyncMetadata factory
 │   ├── change.ts           # PendingChange factory
-│   ├── collection.ts       # LinkwardenCollection factory
-│   ├── link.ts             # LinkwardenLink factory
+│   ├── collection.ts       # LinkwardenCollection factory (uses TEST_COLLECTION)
+│   ├── link.ts             # LinkwardenLink factory (uses TEST_COLLECTION)
 │   └── bookmark.ts         # BookmarkNode factory
 ├── mocks/                  # Mock implementations
 │   ├── index.ts            # Barrel exports
 │   ├── storage.ts          # MockStorage class
 │   ├── bookmarks.ts        # MockBookmarks class
 │   ├── browser.ts          # Browser mocks coordinator
-│   └── linkwarden.ts       # MockLinkwardenAPI class
+│   └── linkwarden.ts       # MockLinkwardenAPI class (uses TEST_COLLECTION)
 ├── utils/                  # Test utilities
 │   ├── index.ts            # Barrel exports
 │   ├── generators.ts       # ID/time generators
-│   └── cleanup.ts          # Cleanup helpers
-├── sync.test.ts            # Unit: Pure functions
-├── storage.test.ts         # Unit: Storage wrapper
-├── api.e2e.test.ts         # E2E: Real Linkwarden API
-└── sync.integration.test.ts # Integration: Full sync engine
+│   ├── cleanup.ts          # Cleanup helpers
+│   └── config.ts           # Test configuration
+├── sync.test.ts            # Unit: Pure functions (28 tests)
+├── storage.test.ts         # Unit: Storage wrapper (21 tests)
+├── api.e2e.test.ts         # E2E: Real Linkwarden API (8 tests)
+├── sync.integration.test.ts # Integration: Full sync engine (52 tests)
+└── bookmark-order.test.ts   # Order preservation (13 tests)
+```
+
+### 3.1 Test Suite Overview
+
+```mermaid
+flowchart TB
+    subgraph Unit["Unit Tests (49 tests)"]
+        SyncUnit["sync.test.ts<br/>28 tests<br/>Pure functions"]
+        StorageUnit["storage.test.ts<br/>21 tests<br/>Storage wrapper"]
+    end
+
+    subgraph E2E["E2E Tests (8 tests)"]
+        APIE2E["api.e2e.test.ts<br/>Real Linkwarden API"]
+    end
+
+    subgraph Integration["Integration Tests (77 tests)"]
+        SyncInt["sync.integration.test.ts<br/>Full sync engine<br/>+ benchmarks"]
+        Order["bookmark-order.test.ts<br/>Order preservation"]
+    end
+
+    Unit --> Integration
+    E2E --> Integration
+
+    style SyncUnit fill:#9f9,stroke:#333
+    style StorageUnit fill:#9f9,stroke:#333
+    style APIE2E fill:#99f,stroke:#333
+    style SyncInt fill:#ff9,stroke:#333
+    style Order fill:#ff9,stroke:#333
 ```
 
 ---
@@ -179,7 +220,7 @@ const past = timestamp(-60000); // 1 minute ago
 | `appendMoveToken()` | 3 | Token creation for folder moves |
 | `extractMoveToken()` | 6 | Token parsing from descriptions |
 | `removeMoveToken()` | 6 | Token cleanup after moves |
-| `parseFolderPath()` | 10 | Path string → array parsing |
+| `parseFolderPath()` | 2 | Path string → array parsing |
 
 **Mock Policy:** None - pure functions only.
 
@@ -260,6 +301,8 @@ test("should add and retrieve a mapping", async () => {
 **Purpose:** Test Linkwarden API client with real server.
 
 **What's Tested:**
+
+**Core API (8 tests):**
 | Test | Purpose |
 |------|---------|
 | Find collection by name | Verify target collection exists |
@@ -282,9 +325,11 @@ COLLECTION=Bookmarks
 
 **Cleanup:** Auto-deletes created links/subcollections in `afterEach`.
 
+**Note:** Bulk operations (`PUT /api/v1/links`) are tested via mock API in `sync.integration.test.ts` since not all Linkwarden instances support this endpoint.
+
 ---
 
-### 5.4 `sync.integration.test.ts` - Integration Tests (48 tests)
+### 5.4 `sync.integration.test.ts` - Integration Tests (52 tests)
 
 **Purpose:** Test full sync engine with mocked browser APIs.
 
@@ -330,6 +375,33 @@ COLLECTION=Bookmarks
 - Server → Browser move via `parentId` change
 - Circular move prevention
 - Token extraction/cleanup
+
+**Bookmark Scanner (3 tests):**
+
+- Detect and queue unmapped bookmarks
+- Skip already mapped bookmarks
+- Scan nested folders for unmapped items
+
+**Duplicate Handling (1 test):**
+
+- Deduplicate same URL in multiple folders
+
+**Performance (1 test):**
+
+- Handle 100+ items efficiently (< 1 second)
+
+**Collection ID Configuration (6 tests):**
+
+- Use collection ID from settings
+- Fall back to name lookup
+- Handle invalid ID gracefully
+
+**Bulk Link Operations (10+ tests):**
+
+- Bulk move links to different collection
+- Preserve order during bulk moves
+- Handle multiple simultaneous moves
+- Performance: 100 link moves (< 500ms)
 
 **Mock Policy:**
 
@@ -382,24 +454,126 @@ test("should handle browser → server folder move", async () => {
 
 ---
 
+### 5.5 `bookmark-order.test.ts` - Order Preservation Tests (13 tests)
+
+**Purpose:** Test bookmark order preservation using `browserIndex` metadata.
+
+**What's Tested:**
+
+**Index Capture (3 tests):**
+
+- Capture index when bookmark is reordered within same folder
+- Distinguish reorder (same parent) from move (different parent)
+- Capture index for both links and folders
+
+**Order Restoration (4 tests):**
+
+- Restore order after sync using browserIndex
+- Restore order for multiple bookmarks in same folder
+- Handle order restoration when parent changes
+- Preserve order across multiple sync cycles
+
+**Conflict Resolution (3 tests):**
+
+- Prefer browser order when browser is newer (LWW)
+- Use server order when checksums match (no user reorder)
+- Normalize indices after deletions
+
+**Scenario: 3 Bookmarks + 1 Subfolder (2 tests):**
+
+- Handle complete reorder scenario with mixed content
+- Handle subfolder with its own internal order
+
+**Performance (1 test):**
+
+- Handle 100+ bookmarks in same folder (< 1 second)
+
+**Edge Cases (2 tests):**
+
+- Handle move to unmapped folder gracefully
+- Preserve order when link is moved back and forth
+
+**Mock Policy:**
+
+- `MockLinkwardenAPI` - Full in-memory API implementation
+- `chrome.storage.local` - Via `MockStorage` class
+- `chrome.bookmarks` - Via `MockBookmarks` class
+
+**Example:**
+
+```typescript
+import { setupBrowserMocks, cleanupBrowserMocks } from "./mocks/browser";
+import { MockLinkwardenAPI } from "./mocks/linkwarden";
+import { SyncEngine } from "../src/sync";
+
+let mocks: ReturnType<typeof setupBrowserMocks>;
+let mockApi: MockLinkwardenAPI;
+let syncEngine: SyncEngine;
+
+beforeEach(() => {
+  mocks = setupBrowserMocks();
+  mockApi = new MockLinkwardenAPI();
+  syncEngine = new SyncEngine(mockApi as unknown as LinkwardenAPI);
+});
+
+afterEach(() => {
+  cleanupBrowserMocks();
+});
+
+test("should restore bookmark order after sync using browserIndex", async () => {
+  // Arrange: Create collection with 3 links
+  const collection = await mockApi.createCollectionWithId(
+    TARGET_COLLECTION_ID,
+    "Unorganized"
+  );
+
+  await mockApi.createLink("https://first.com", collection.id, "First");
+  await mockApi.createLink("https://second.com", collection.id, "Second");
+  await mockApi.createLink("https://third.com", collection.id, "Third");
+
+  // Initial sync
+  await syncEngine.sync();
+
+  // Set custom order: 1, 2, 0 (instead of 0, 1, 2)
+  const children = await bookmarks.getChildren(BROWSER_ROOT_FOLDER_ID);
+  // ... set browserIndex for each mapping
+
+  // Act: Sync again - should restore order
+  await syncEngine.sync();
+
+  // Assert: Order restored
+  expect(children[0].title).toBe("Second");
+  expect(children[1].title).toBe("Third");
+  expect(children[2].title).toBe("First");
+});
+```
+
+---
+
 ## 6. Test Coverage Matrix
 
-| Feature              | Unit | Storage | API E2E | Integration |
-| -------------------- | ---- | ------- | ------- | ----------- |
-| Checksum computation | ✅   | -       | -       | -           |
-| Conflict resolution  | ✅   | -       | -       | ✅          |
-| Move token helpers   | ✅   | -       | -       | -           |
-| Path parsing         | ✅   | -       | -       | -           |
-| Storage CRUD         | -    | ✅      | -       | ✅          |
-| Linkwarden API       | -    | -       | ✅      | -           |
-| Initial sync         | -    | -       | -       | ✅          |
-| Incremental sync     | -    | -       | -       | ✅          |
-| Browser → Server     | -    | -       | -       | ✅          |
-| Server → Browser     | -    | -       | -       | ✅          |
-| Subcollections       | -    | -       | -       | ✅          |
-| Folder moves         | -    | -       | -       | ✅          |
-| Duplicate handling   | -    | -       | -       | ✅          |
-| Error handling       | -    | -       | -       | ✅          |
+| Feature                  | Unit | Storage | API E2E | Integration | Order |
+| ------------------------ | ---- | ------- | ------- | ----------- | ----- |
+| Checksum computation     | ✅   | -       | -       | -           | -     |
+| Conflict resolution      | ✅   | -       | -       | ✅          | -     |
+| Move token helpers       | ✅   | -       | -       | -           | -     |
+| Path parsing             | ✅   | -       | -       | -           | -     |
+| Storage CRUD             | -    | ✅      | -       | ✅          | -     |
+| Linkwarden API           | -    | -       | ✅      | -           | -     |
+| Initial sync             | -    | -       | -       | ✅          | -     |
+| Incremental sync         | -    | -       | -       | ✅          | -     |
+| Browser → Server         | -    | -       | -       | ✅          | -     |
+| Server → Browser         | -    | -       | -       | ✅          | -     |
+| Subcollections           | -    | -       | -       | ✅          | ✅    |
+| Folder moves             | -    | -       | -       | ✅          | ✅    |
+| Duplicate handling       | -    | -       | -       | ✅          | -     |
+| Error handling           | -    | -       | -       | ✅          | -     |
+| Bookmark scanner         | -    | -       | -       | ✅          | -     |
+| Performance (100+ items) | -    | -       | -       | ✅          | ✅    |
+| Collection ID config     | -    | -       | -       | ✅          | -     |
+| Order preservation       | -    | -       | -       | -           | ✅    |
+| Optimized fetch          | -    | -       | -       | ✅          | -     |
+| Retry logic              | -    | -       | ✅      | ✅          | -     |
 
 ---
 
@@ -529,6 +703,7 @@ bun run dev  # Watch mode with hot-reload
 ```
 
 **Why Manual Testing:**
+
 - UI is simple (popup with ~400px width)
 - Visual changes are immediately visible in browser
 - Tailwind utility classes reduce styling bugs
@@ -548,14 +723,15 @@ src/popup/
 
 If UI complexity increases, consider adding:
 
-| Test Type | Tool | Purpose |
-|-----------|------|---------|
-| **Component tests** | `@testing-library/preact` | Test component rendering, interactions |
-| **Visual regression** | `playwright` | Screenshot comparison for UI changes |
-| **E2E tests** | `playwright` | Full popup interaction flows |
-| **Accessibility** | `axe-core` | A11y compliance checks |
+| Test Type             | Tool                      | Purpose                                |
+| --------------------- | ------------------------- | -------------------------------------- |
+| **Component tests**   | `@testing-library/preact` | Test component rendering, interactions |
+| **Visual regression** | `playwright`              | Screenshot comparison for UI changes   |
+| **E2E tests**         | `playwright`              | Full popup interaction flows           |
+| **Accessibility**     | `axe-core`                | A11y compliance checks                 |
 
 **Decision:** Keep manual testing for now. Add automated UI tests if:
+
 - Component count grows significantly
 - Visual regression issues reported
 - Accessibility compliance required
@@ -577,6 +753,7 @@ bunx @tailwindcss/cli -i src/popup/styles.css -o dist/chrome/popup.css --minify
 ```
 
 **What to Check:**
+
 - ✅ All components render correctly
 - ✅ Dark mode works (if enabled)
 - ✅ No console errors

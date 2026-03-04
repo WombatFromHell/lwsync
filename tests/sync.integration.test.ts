@@ -24,9 +24,13 @@ import { createMapping, createCollectionMapping } from "./fixtures/mapping";
 import { createSyncMetadata } from "./fixtures/metadata";
 import { createPendingChange } from "./fixtures/change";
 import { createLink, createCollection } from "./fixtures";
+import { uniqueUrl } from "./utils/generators";
+import * as bookmarks from "../src/bookmarks";
+import { getTestCollectionId } from "./utils/config";
 
 // Test configuration
 const TEST_TIMEOUT = 15000;
+const TEST_COLLECTION_ID = getTestCollectionId();
 
 // Mock API instance
 let mockApi: MockLinkwardenAPI;
@@ -124,15 +128,23 @@ describe("Integration: SyncEngine", () => {
       "should sync links from Linkwarden to browser on first sync",
       async () => {
         // Create links in mock Linkwarden
-        await mockApi.createLink("https://example1.com", 1, "Link 1");
-        await mockApi.createLink("https://example2.com", 1, "Link 2");
+        await mockApi.createLink(
+          "https://example1.com",
+          TEST_COLLECTION_ID,
+          "Link 1"
+        );
+        await mockApi.createLink(
+          "https://example2.com",
+          TEST_COLLECTION_ID,
+          "Link 2"
+        );
 
         // Setup sync metadata
         await storage.saveSyncMetadata({
           id: "sync_state",
           lastSyncTime: 0,
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2", // Other Bookmarks
         });
 
@@ -159,7 +171,7 @@ describe("Integration: SyncEngine", () => {
           id: "sync_state",
           lastSyncTime: 0,
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -179,7 +191,7 @@ describe("Integration: SyncEngine", () => {
         // Create and sync a link
         const link = await mockApi.createLink(
           "https://example.com",
-          1,
+          TEST_COLLECTION_ID,
           "Example"
         );
 
@@ -187,7 +199,7 @@ describe("Integration: SyncEngine", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -220,7 +232,7 @@ describe("Integration: SyncEngine", () => {
         // Create link
         const link = await mockApi.createLink(
           "https://original.com",
-          1,
+          TEST_COLLECTION_ID,
           "Original"
         );
 
@@ -243,7 +255,7 @@ describe("Integration: SyncEngine", () => {
           id: "sync_state",
           lastSyncTime: oldTime,
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -281,7 +293,7 @@ describe("Integration: SyncEngine", () => {
         // Create link in Linkwarden
         const link = await mockApi.createLink(
           "https://example.com",
-          1,
+          TEST_COLLECTION_ID,
           "Original"
         );
 
@@ -291,7 +303,7 @@ describe("Integration: SyncEngine", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -320,7 +332,7 @@ describe("Integration: SyncEngine", () => {
       async () => {
         const link = await mockApi.createLink(
           "https://example.com",
-          1,
+          TEST_COLLECTION_ID,
           "Example"
         );
 
@@ -329,7 +341,7 @@ describe("Integration: SyncEngine", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -388,14 +400,22 @@ describe("Integration: SyncEngine", () => {
       "should continue sync even if one link fails",
       async () => {
         // Create multiple links
-        await mockApi.createLink("https://link1.com", 1, "Link 1");
-        await mockApi.createLink("https://link2.com", 1, "Link 2");
+        await mockApi.createLink(
+          "https://link1.com",
+          TEST_COLLECTION_ID,
+          "Link 1"
+        );
+        await mockApi.createLink(
+          "https://link2.com",
+          TEST_COLLECTION_ID,
+          "Link 2"
+        );
 
         await storage.saveSyncMetadata({
           id: "sync_state",
           lastSyncTime: 0,
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -456,6 +476,7 @@ describe("Integration: Conflict Resolution", () => {
 });
 
 describe("Round-Trip Sync Scenarios", () => {
+  let mocks: ReturnType<typeof setupBrowserMocks>;
   let mockApi: MockLinkwardenAPI;
   let syncEngine: SyncEngine;
 
@@ -478,7 +499,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -530,7 +551,7 @@ describe("Round-Trip Sync Scenarios", () => {
         // Create link in Linkwarden first
         const link = await mockApi.createLink(
           "https://original.com",
-          1,
+          TEST_COLLECTION_ID,
           "Original"
         );
 
@@ -538,7 +559,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -587,7 +608,8 @@ describe("Round-Trip Sync Scenarios", () => {
         expect(result.errors).toHaveLength(0);
 
         // Verify link was updated on server
-        const updatedLink = await mockApi.getCollectionLinks(1);
+        const updatedLink =
+          await mockApi.getCollectionLinks(TEST_COLLECTION_ID);
         const found = updatedLink.find((l) => l.id === link.id);
         expect(found?.url).toBe("https://updated.com");
         expect(found?.name).toBe("Updated Title");
@@ -601,7 +623,7 @@ describe("Round-Trip Sync Scenarios", () => {
         // Create link in Linkwarden
         const link = await mockApi.createLink(
           "https://todelete.com",
-          1,
+          TEST_COLLECTION_ID,
           "To Delete"
         );
 
@@ -609,7 +631,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -641,7 +663,7 @@ describe("Round-Trip Sync Scenarios", () => {
         expect(result.errors).toHaveLength(0);
 
         // Verify link was deleted on server
-        const links = await mockApi.getCollectionLinks(1);
+        const links = await mockApi.getCollectionLinks(TEST_COLLECTION_ID);
         expect(links.find((l) => l.id === link.id)).toBeUndefined();
       },
       TEST_TIMEOUT
@@ -655,12 +677,12 @@ describe("Round-Trip Sync Scenarios", () => {
         // Create links in Linkwarden
         const link1 = await mockApi.createLink(
           "https://keep-me.com",
-          1,
+          TEST_COLLECTION_ID,
           "Keep Me"
         );
         const link2 = await mockApi.createLink(
           "https://delete-me.com",
-          1,
+          TEST_COLLECTION_ID,
           "Delete Me"
         );
 
@@ -668,7 +690,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: 0,
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -691,7 +713,7 @@ describe("Round-Trip Sync Scenarios", () => {
         await mockApi.deleteLink(link2.id);
 
         // Verify link is gone from server
-        let serverLinks = await mockApi.getCollectionLinks(1);
+        let serverLinks = await mockApi.getCollectionLinks(TEST_COLLECTION_ID);
         expect(serverLinks.find((l) => l.id === link2.id)).toBeUndefined();
         expect(serverLinks.length).toBe(1);
 
@@ -748,7 +770,8 @@ describe("Round-Trip Sync Scenarios", () => {
         let collectionMappings = mappings.filter(
           (m) => m.linkwardenType === "collection"
         );
-        expect(collectionMappings.length).toBe(2); // Parent + Child collection
+        // Root collection doesn't create a folder, only subcollections do
+        expect(collectionMappings.length).toBe(1); // Only child collection
 
         // Delete child collection directly from Linkwarden
         await mockApi.deleteCollection(childCollection.id);
@@ -762,7 +785,8 @@ describe("Round-Trip Sync Scenarios", () => {
         collectionMappings = mappings.filter(
           (m) => m.linkwardenType === "collection"
         );
-        expect(collectionMappings.length).toBe(1); // Only parent remains
+        // Parent is root collection (no mapping), child was deleted, so 0 remain
+        expect(collectionMappings.length).toBe(0); // Only parent remains (but it's root, no mapping)
       },
       TEST_TIMEOUT
     );
@@ -773,7 +797,7 @@ describe("Round-Trip Sync Scenarios", () => {
         // Create a link in Linkwarden
         const link = await mockApi.createLink(
           "https://test.com",
-          1,
+          TEST_COLLECTION_ID,
           "Test Link"
         );
 
@@ -781,7 +805,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: 0,
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -881,8 +905,10 @@ describe("Round-Trip Sync Scenarios", () => {
           (m) => m.linkwardenType === "link"
         );
 
-        expect(collectionMappings.length).toBe(2); // Parent + Child collection
-        expect(linkMappings.length).toBe(2); // One in parent, one in child
+        // Root collection (parentCollection) doesn't create a folder - syncs directly to browser root
+        // Only subcollections create folders
+        expect(collectionMappings.length).toBe(1); // Only child collection
+        expect(linkMappings.length).toBe(2); // One in root (parent), one in child folder
       },
       TEST_TIMEOUT
     );
@@ -890,10 +916,16 @@ describe("Round-Trip Sync Scenarios", () => {
     test(
       "should handle duplicate folder names using path-based matching",
       async () => {
-        // Start with default collection (id: 1) and create subcollections with duplicate names
+        // Start with TEST_COLLECTION and create subcollections with duplicate names
         // Create parent collections under the default test collection
-        const parent1 = await mockApi.createCollection("Parent 1", 1);
-        const parent2 = await mockApi.createCollection("Parent 2", 1);
+        const parent1 = await mockApi.createCollection(
+          "Parent 1",
+          TEST_COLLECTION_ID
+        );
+        const parent2 = await mockApi.createCollection(
+          "Parent 2",
+          TEST_COLLECTION_ID
+        );
         const child1 = await mockApi.createCollection("Resources", parent1.id);
         const child2 = await mockApi.createCollection("Resources", parent2.id);
 
@@ -905,7 +937,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: 0,
           syncDirection: "bidirectional",
-          targetCollectionId: 1, // Root test collection
+          targetCollectionId: TEST_COLLECTION_ID, // Root test collection
           browserRootFolderId: "2",
         });
 
@@ -928,7 +960,10 @@ describe("Round-Trip Sync Scenarios", () => {
 
   describe("Path-Based Matching Utilities", () => {
     test("should build correct path from collection hierarchy", async () => {
-      const parent = await mockApi.createCollection("Parent", 1);
+      const parent = await mockApi.createCollection(
+        "Parent",
+        TEST_COLLECTION_ID
+      );
       const child = await mockApi.createCollection("Child", parent.id);
       const grandchild = await mockApi.createCollection("Grandchild", child.id);
 
@@ -1000,7 +1035,7 @@ describe("Round-Trip Sync Scenarios", () => {
         // Step 1: Create link on server
         const originalLink = await mockApi.createLink(
           "https://example.com",
-          1,
+          TEST_COLLECTION_ID,
           "Example"
         );
 
@@ -1008,7 +1043,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: 0,
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -1043,7 +1078,7 @@ describe("Round-Trip Sync Scenarios", () => {
         expect(result.errors).toHaveLength(0);
 
         // Step 5: Verify server has updated link
-        const links = await mockApi.getCollectionLinks(1);
+        const links = await mockApi.getCollectionLinks(TEST_COLLECTION_ID);
         const updatedLink = links.find((l) => l.id === originalLink.id);
         expect(updatedLink?.url).toBe("https://updated-example.com");
         expect(updatedLink?.name).toBe("Updated Example");
@@ -1057,7 +1092,7 @@ describe("Round-Trip Sync Scenarios", () => {
         // Create link on server
         const link = await mockApi.createLink(
           "https://original.com",
-          1,
+          TEST_COLLECTION_ID,
           "Original"
         );
 
@@ -1065,7 +1100,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -1109,7 +1144,7 @@ describe("Round-Trip Sync Scenarios", () => {
         // Create link on server first
         const existingLink = await mockApi.createLink(
           "https://existing.com",
-          1,
+          TEST_COLLECTION_ID,
           "Existing"
         );
 
@@ -1117,7 +1152,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -1170,7 +1205,7 @@ describe("Round-Trip Sync Scenarios", () => {
         // Create link on server and sync to browser
         const link = await mockApi.createLink(
           "https://example.com",
-          1,
+          TEST_COLLECTION_ID,
           "Original Name"
         );
 
@@ -1178,7 +1213,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -1226,7 +1261,8 @@ describe("Round-Trip Sync Scenarios", () => {
         expect(result.errors).toHaveLength(0);
 
         // Verify link was renamed on server
-        const updatedLinks = await mockApi.getCollectionLinks(1);
+        const updatedLinks =
+          await mockApi.getCollectionLinks(TEST_COLLECTION_ID);
         const updatedLink = updatedLinks.find((l) => l.id === link.id);
         expect(updatedLink?.name).toBe("Renamed Title");
       },
@@ -1309,7 +1345,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -1389,7 +1425,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -1488,14 +1524,14 @@ describe("Round-Trip Sync Scenarios", () => {
     test(
       "should handle server → browser move detection",
       async () => {
-        // Use root collection (id: 1) and create a subcollection for the move target
+        // Use TEST_COLLECTION and create a subcollection for the move target
         const targetCollection = await mockApi.createCollection(
           "Target Folder",
-          1
+          TEST_COLLECTION_ID
         );
         const link = await mockApi.createLink(
           "https://example.com",
-          1,
+          TEST_COLLECTION_ID,
           "Link to Move"
         );
 
@@ -1503,7 +1539,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -1583,14 +1619,21 @@ describe("Round-Trip Sync Scenarios", () => {
       "should handle link move to nested subcollection",
       async () => {
         // Create a simple parent-child structure under root (id: 1)
-        const parent = await mockApi.createCollection("Parent", 1);
-        const link = await mockApi.createLink("https://example.com", 1, "Link");
+        const parent = await mockApi.createCollection(
+          "Parent",
+          TEST_COLLECTION_ID
+        );
+        const link = await mockApi.createLink(
+          "https://example.com",
+          TEST_COLLECTION_ID,
+          "Link"
+        );
 
         await storage.saveSyncMetadata({
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -1665,14 +1708,14 @@ describe("Round-Trip Sync Scenarios", () => {
     test(
       "should handle concurrent move and rename",
       async () => {
-        // Use root collection and a subcollection for the move target
+        // Use TEST_COLLECTION and create a subcollection for the move target
         const targetCollection = await mockApi.createCollection(
           "Target Folder",
-          1
+          TEST_COLLECTION_ID
         );
         const link = await mockApi.createLink(
           "https://example.com",
-          1,
+          TEST_COLLECTION_ID,
           "Original Name"
         );
 
@@ -1680,7 +1723,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -1761,8 +1804,14 @@ describe("Round-Trip Sync Scenarios", () => {
       "should handle browser → server folder move using description token",
       async () => {
         // Create folder structure
-        const parent1 = await mockApi.createCollection("Parent 1", 1);
-        const parent2 = await mockApi.createCollection("Parent 2", 1);
+        const parent1 = await mockApi.createCollection(
+          "Parent 1",
+          TEST_COLLECTION_ID
+        );
+        const parent2 = await mockApi.createCollection(
+          "Parent 2",
+          TEST_COLLECTION_ID
+        );
         const childFolder = await mockApi.createCollection(
           "Child Folder",
           parent1.id
@@ -1772,7 +1821,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -1890,8 +1939,14 @@ describe("Round-Trip Sync Scenarios", () => {
       "should handle server → browser folder move via parentId change",
       async () => {
         // Create folder structure
-        const parent1 = await mockApi.createCollection("Parent 1", 1);
-        const parent2 = await mockApi.createCollection("Parent 2", 1);
+        const parent1 = await mockApi.createCollection(
+          "Parent 1",
+          TEST_COLLECTION_ID
+        );
+        const parent2 = await mockApi.createCollection(
+          "Parent 2",
+          TEST_COLLECTION_ID
+        );
         const childFolder = await mockApi.createCollection(
           "Child Folder",
           parent1.id
@@ -1901,7 +1956,7 @@ describe("Round-Trip Sync Scenarios", () => {
           id: "sync_state",
           lastSyncTime: Date.now(),
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -2000,14 +2055,18 @@ describe("Round-Trip Sync Scenarios", () => {
       async () => {
         // Create 100 links on server
         for (let i = 0; i < 100; i++) {
-          await mockApi.createLink(`https://link${i}.com`, 1, `Link ${i}`);
+          await mockApi.createLink(
+            `https://link${i}.com`,
+            TEST_COLLECTION_ID,
+            `Link ${i}`
+          );
         }
 
         await storage.saveSyncMetadata({
           id: "sync_state",
           lastSyncTime: 0,
           syncDirection: "bidirectional",
-          targetCollectionId: 1,
+          targetCollectionId: TEST_COLLECTION_ID,
           browserRootFolderId: "2",
         });
 
@@ -2271,6 +2330,349 @@ describe("Round-Trip Sync Scenarios", () => {
           (c) => c.name === "SingleCollection"
         );
         expect(collection?.parentId).toBeUndefined();
+      },
+      TEST_TIMEOUT
+    );
+  });
+
+  describe("Collection ID Configuration", () => {
+    test(
+      "should find collection by numeric ID",
+      async () => {
+        const collection = await mockApi.createCollection("Favorites");
+        const collectionId = collection.id;
+
+        const result = await syncEngine["findOrCreateCollection"](
+          collectionId.toString()
+        );
+
+        expect(result).toBeDefined();
+        expect(result?.id).toBe(collectionId);
+        expect(result?.name).toBe("Favorites");
+      },
+      TEST_TIMEOUT
+    );
+
+    test(
+      "should fall back to name lookup if ID not found",
+      async () => {
+        await mockApi.createCollection("MyCollection");
+
+        const result =
+          await syncEngine["findOrCreateCollection"]("MyCollection");
+
+        expect(result).toBeDefined();
+        expect(result?.name).toBe("MyCollection");
+      },
+      TEST_TIMEOUT
+    );
+
+    test(
+      "should prefer ID over name when both are provided",
+      async () => {
+        const collection1 = await mockApi.createCollection("Collection A");
+        await mockApi.createCollection("Collection B");
+
+        const result = await syncEngine["findOrCreateCollection"](
+          collection1.id.toString()
+        );
+
+        expect(result?.id).toBe(collection1.id);
+        expect(result?.name).toBe("Collection A");
+      },
+      TEST_TIMEOUT
+    );
+
+    test(
+      "should handle invalid ID gracefully",
+      async () => {
+        const result = await syncEngine["findOrCreateCollection"]("99999");
+
+        expect(result).toBeDefined();
+      },
+      TEST_TIMEOUT
+    );
+
+    test(
+      "should save and retrieve settings with collection ID",
+      async () => {
+        const settings = {
+          serverUrl: "https://test.example.com",
+          accessToken: "test-token",
+          syncInterval: 5,
+          targetCollectionId: 42,
+          targetCollectionName: "Favorites",
+          browserFolderName: "",
+        };
+
+        await storage.saveSettings(settings);
+        const retrieved = await storage.getSettings();
+
+        expect(retrieved?.targetCollectionId).toBe(42);
+        expect(retrieved?.targetCollectionName).toBe("Favorites");
+      },
+      TEST_TIMEOUT
+    );
+
+    test(
+      "should work with ID-only configuration (no name)",
+      async () => {
+        const collection = await mockApi.createCollection("ID Only Test");
+        const settings = {
+          serverUrl: "https://test.example.com",
+          accessToken: "test-token",
+          syncInterval: 5,
+          targetCollectionId: collection.id,
+          targetCollectionName: undefined,
+          browserFolderName: "",
+        };
+        await storage.saveSettings(settings);
+
+        const result = await syncEngine["findOrCreateCollection"](
+          collection.id.toString()
+        );
+
+        expect(result?.id).toBe(collection.id);
+        expect(result?.name).toBe("ID Only Test");
+      },
+      TEST_TIMEOUT
+    );
+  });
+
+  describe("Bookmark Scanner (Unmapped Bookmarks)", () => {
+    test(
+      "should detect and queue unmapped bookmarks for sync",
+      async () => {
+        // Arrange: Configure sync without existing mappings
+        await storage.saveSyncMetadata({
+          id: "sync_state",
+          lastSyncTime: 0,
+          syncDirection: "bidirectional",
+          targetCollectionId: TEST_COLLECTION_ID,
+          browserRootFolderId: "2",
+        });
+
+        // Create bookmarks BEFORE sync (simulating existing bookmarks)
+        const urls: string[] = [];
+        for (let i = 0; i < 2; i++) {
+          const url = uniqueUrl();
+          urls.push(url);
+          await bookmarks.create({
+            parentId: "2",
+            url,
+            title: `Existing ${i}`,
+          });
+        }
+
+        // Act: Sync (should scan and detect unmapped bookmarks)
+        const result = await syncEngine.sync();
+
+        // Assert: Bookmarks were detected and uploaded
+        const links = await mockApi.getCollectionLinks(TEST_COLLECTION_ID);
+        expect(links.length).toBe(2);
+
+        for (const url of urls) {
+          const link = links.find((l) => l.url === url);
+          expect(link).toBeDefined();
+        }
+      },
+      TEST_TIMEOUT
+    );
+
+    test(
+      "should skip already mapped bookmarks during scan",
+      async () => {
+        // Arrange: Configure sync with existing mapping
+        await storage.saveSyncMetadata({
+          id: "sync_state",
+          lastSyncTime: 0,
+          syncDirection: "bidirectional",
+          targetCollectionId: TEST_COLLECTION_ID,
+          browserRootFolderId: "2",
+        });
+
+        // Create bookmark and mapping
+        const url = uniqueUrl();
+        const bookmark = await bookmarks.create({
+          parentId: "2",
+          url,
+          title: "Mapped",
+        });
+
+        // Create mapping manually (simulating already synced bookmark)
+        const existingLink = await mockApi.createLink(
+          url,
+          TEST_COLLECTION_ID,
+          bookmark.title
+        );
+        await storage.upsertMapping({
+          id: crypto.randomUUID(),
+          linkwardenType: "link",
+          linkwardenId: existingLink.id,
+          browserId: bookmark.id,
+          linkwardenUpdatedAt: Date.now(),
+          browserUpdatedAt: Date.now(),
+          lastSyncedAt: Date.now(),
+          checksum: computeChecksum(existingLink),
+        });
+
+        // Act: Sync
+        const result = await syncEngine.sync();
+
+        // Assert: No duplicate created
+        const links = await mockApi.getCollectionLinks(TEST_COLLECTION_ID);
+        expect(links.length).toBe(1); // Only the original link
+      },
+      TEST_TIMEOUT
+    );
+
+    test(
+      "should scan nested folders for unmapped bookmarks",
+      async () => {
+        // Arrange: Configure sync
+        await storage.saveSyncMetadata({
+          id: "sync_state",
+          lastSyncTime: 0,
+          syncDirection: "bidirectional",
+          targetCollectionId: TEST_COLLECTION_ID,
+          browserRootFolderId: "2",
+        });
+
+        // Create folder structure
+        const folder = await bookmarks.create({
+          parentId: "2",
+          title: "My Folder",
+        });
+
+        // Create bookmark inside folder
+        const url = uniqueUrl();
+        await bookmarks.create({
+          parentId: folder.id,
+          url,
+          title: "Nested",
+        });
+
+        // Act: Sync
+        const result = await syncEngine.sync();
+
+        // Assert: Nested bookmark was found and synced
+        const links = await mockApi.getCollectionLinks(TEST_COLLECTION_ID);
+        const link = links.find((l) => l.url === url);
+        expect(link).toBeDefined();
+      },
+      TEST_TIMEOUT
+    );
+  });
+
+  describe("Duplicate Handling", () => {
+    test(
+      "should deduplicate same URL in multiple folders",
+      async () => {
+        // Arrange: Configure sync
+        await storage.saveSyncMetadata({
+          id: "sync_state",
+          lastSyncTime: 0,
+          syncDirection: "bidirectional",
+          targetCollectionId: TEST_COLLECTION_ID,
+          browserRootFolderId: "2",
+        });
+
+        // Create same URL in two different folders
+        const url = uniqueUrl();
+
+        const folder1 = await bookmarks.create({
+          parentId: "2",
+          title: "Folder 1",
+        });
+
+        const folder2 = await bookmarks.create({
+          parentId: "2",
+          title: "Folder 2",
+        });
+
+        const bookmark1 = await bookmarks.create({
+          parentId: folder1.id,
+          url,
+          title: "In Folder 1",
+        });
+
+        const bookmark2 = await bookmarks.create({
+          parentId: folder2.id,
+          url,
+          title: "In Folder 2",
+        });
+
+        // Act: Sync
+        const result = await syncEngine.sync();
+
+        // Assert: Only one link created (deduplication by URL)
+        const links = await mockApi.getCollectionLinks(TEST_COLLECTION_ID);
+        const linksWithUrl = links.filter((l) => l.url === url);
+        expect(linksWithUrl.length).toBe(1);
+
+        // Verify at least one bookmark has a mapping
+        const mappings = await storage.getMappings();
+        const mappingsForUrl = mappings.filter(
+          (m) => m.browserId === bookmark1.id || m.browserId === bookmark2.id
+        );
+        expect(mappingsForUrl.length).toBeGreaterThanOrEqual(1);
+      },
+      TEST_TIMEOUT
+    );
+  });
+
+  describe("Performance", () => {
+    test(
+      "should handle 100+ items efficiently",
+      async () => {
+        // Arrange: Configure sync
+        await storage.saveSyncMetadata({
+          id: "sync_state",
+          lastSyncTime: 0,
+          syncDirection: "bidirectional",
+          targetCollectionId: TEST_COLLECTION_ID,
+          browserRootFolderId: "2",
+        });
+
+        // Create 100 bookmarks in browser
+        for (let i = 0; i < 100; i++) {
+          await bookmarks.create({
+            parentId: "2",
+            url: uniqueUrl(),
+            title: `Bookmark ${i}`,
+          });
+        }
+
+        // Create 100 links on server (50 match, 50 different)
+        const browserTree = await bookmarks.getTree();
+        const browserUrls: string[] = [];
+
+        function collectUrls(node: (typeof browserTree)[number]): void {
+          if (node.url) browserUrls.push(node.url);
+          if (node.children) {
+            node.children.forEach(collectUrls);
+          }
+        }
+
+        browserTree.forEach(collectUrls);
+
+        for (let i = 0; i < 100; i++) {
+          await mockApi.createLink(
+            i < 50 ? browserUrls[i] : uniqueUrl(),
+            TEST_COLLECTION_ID,
+            `Link ${i}`
+          );
+        }
+
+        // Act: Compare (should complete in < 1 second)
+        const startTime = Date.now();
+        const comparison = await syncEngine.compare();
+        const duration = Date.now() - startTime;
+
+        // Assert: Reasonable performance and correct counts
+        expect(duration).toBeLessThan(1000); // < 1 second
+        expect(comparison.summary.toUploadCount).toBe(50);
+        expect(comparison.summary.syncedCount).toBe(50);
       },
       TEST_TIMEOUT
     );

@@ -11,13 +11,16 @@
 
 import type { LinkwardenAPI } from "../api";
 import type { SyncMetadata } from "../types/storage";
+import type { PendingChange } from "../types/storage";
 import type { SyncResult } from "../types/sync";
+import type { SyncComparison, ComparisonOptions } from "../types/comparator";
 import * as storage from "../storage";
 import { SyncErrorReporter, createErrorContext } from "./errorReporter";
 import { BrowserChangeApplier } from "./browser-changes";
 import { RemoteSync } from "./remote-sync";
 import { SyncInitializer } from "./initialization";
 import { OrphanCleanup } from "./orphans";
+import { SyncComparator } from "./comparator";
 import { createLogger } from "../utils";
 
 const logger = createLogger("LWSync engine");
@@ -72,6 +75,7 @@ export class SyncEngine {
   private remoteSync: RemoteSync;
   private initializer: SyncInitializer;
   private orphans: OrphanCleanup;
+  private comparator: SyncComparator;
 
   constructor(api: LinkwardenAPI) {
     this.api = api;
@@ -82,6 +86,7 @@ export class SyncEngine {
     this.remoteSync = new RemoteSync(this.api, this.errors);
     this.initializer = new SyncInitializer(this.api, this.errors);
     this.orphans = new OrphanCleanup(this.errors);
+    this.comparator = new SyncComparator(this.api, this.errors);
   }
 
   /**
@@ -131,6 +136,15 @@ export class SyncEngine {
     this.isSyncing = true;
 
     try {
+      logger.info("Starting sync:", {
+        targetCollectionId: metadata.targetCollectionId,
+        browserRootFolderId: metadata.browserRootFolderId,
+        lastSyncTime: metadata.lastSyncTime,
+      });
+
+      // Step 0: Scan for unmapped bookmarks (catch bookmarks created before extension loaded)
+      await this.scanForUnmappedBookmarks();
+
       // Step 1: Process pending changes from browser events FIRST
       await this.processPendingChanges();
 
@@ -162,7 +176,35 @@ export class SyncEngine {
   }
 
   /**
+   * Scan for unmapped bookmarks and queue them for sync
+   * This catches bookmarks created before the extension was loaded
+   */
+  private async scanForUnmappedBookmarks(): Promise<void> {
+    try {
+      const result = await this.comparator.scanAndQueueUnmapped();
+      if (result.queued > 0) {
+        logger.info("Found unmapped bookmarks:", {
+          queued: result.queued,
+          scanned: result.scanned,
+          skipped: result.skipped,
+        });
+      }
+    } catch (error) {
+      // Don't fail the entire sync if scan fails
+      this.errors.collect(
+        error as Error,
+        createErrorContext("scanForUnmappedBookmarks")
+      );
+      logger.warn(
+        "Bookmark scan failed, continuing with sync:",
+        error as Error
+      );
+    }
+  }
+
+  /**
    * Process pending changes from browser event listeners
+   * Batches link moves and deletes for efficiency
    */
   private async processPendingChanges(): Promise<void> {
     const pending = await storage.getPendingChanges();
@@ -170,7 +212,93 @@ export class SyncEngine {
 
     if (unresolved.length === 0) return;
 
+    const metadata = await storage.getSyncMetadata();
+    if (!metadata) {
+      logger.warn("No sync metadata, skipping pending changes");
+      return;
+    }
+
+    // Separate link moves and deletes from other changes for batch processing
+    const linkMoves: PendingChange[] = [];
+    const linkDeletes: PendingChange[] = [];
+    const otherChanges: PendingChange[] = [];
+
     for (const change of unresolved) {
+      if (
+        change.type === "move" &&
+        change.source === "browser" &&
+        change.linkwardenId !== undefined
+      ) {
+        // Check if it's a link (not a folder)
+        const mapping = await storage.getMappingByBrowserId(change.browserId!);
+        if (mapping?.linkwardenType === "link") {
+          // Only batch moves to different collections, not reorders within same folder
+          const isReorder = change.oldParentId === change.parentId;
+          if (!isReorder) {
+            linkMoves.push(change);
+            continue;
+          }
+        }
+      }
+
+      // Collect delete operations
+      if (
+        change.type === "delete" &&
+        change.source === "browser" &&
+        change.linkwardenId !== undefined
+      ) {
+        const mapping = await storage.getMappingByBrowserId(change.browserId!);
+        if (mapping?.linkwardenType === "link") {
+          linkDeletes.push(change);
+          continue;
+        }
+      }
+
+      otherChanges.push(change);
+    }
+
+    // Process link moves in batches (more efficient)
+    if (linkMoves.length > 0) {
+      try {
+        await this.browserChanges.batchProcessLinkMoves(linkMoves, metadata);
+        // Mark link moves as resolved
+        for (const change of linkMoves) {
+          await storage.resolvePendingChange(change.id);
+        }
+      } catch (error) {
+        this.errors.collect(
+          error as Error,
+          createErrorContext("batchProcessLinkMoves")
+        );
+        // Still resolve to prevent infinite retry
+        for (const change of linkMoves) {
+          await storage.resolvePendingChange(change.id);
+        }
+      }
+    }
+
+    // Process link deletes in batches (more efficient)
+    if (linkDeletes.length > 0) {
+      try {
+        await this.browserChanges.batchProcessLinkDeletes(linkDeletes);
+        // Mark link deletes as resolved
+        for (const change of linkDeletes) {
+          await storage.resolvePendingChange(change.id);
+        }
+      } catch (error) {
+        this.errors.collect(
+          error as Error,
+          createErrorContext("batchProcessLinkDeletes")
+        );
+        // Still resolve to prevent infinite retry
+        for (const change of linkDeletes) {
+          await storage.resolvePendingChange(change.id);
+        }
+      }
+    }
+
+    // Process other changes individually
+    for (const change of otherChanges) {
       try {
         if (change.source === "browser") {
           await this.browserChanges.apply(change);
@@ -219,6 +347,17 @@ export class SyncEngine {
   }
 
   /**
+   * Compare browser bookmarks with server links
+   * Returns detailed report of sync status
+   */
+  async compare(options: ComparisonOptions = {}): Promise<SyncComparison> {
+    logger.info("Starting sync comparison...");
+    const result = await this.comparator.compare(options);
+    logger.info("Comparison complete:", result.summary);
+    return result;
+  }
+
+  /**
    * Reset all sync data
    */
   async reset(): Promise<void> {
@@ -241,6 +380,9 @@ export class SyncEngine {
       remoteCollectionIds,
       browserRootFolderId
     );
+
+    // Normalize indices after deletions
+    await this.orphans.normalizeIndices(browserRootFolderId);
   }
 
   /**

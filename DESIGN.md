@@ -8,7 +8,7 @@ A browser extension that bidirectionally syncs a Linkwarden collection (and subc
 
 ## 1. Overview
 
-**Implementation Status:** Complete and tested (105 tests passing)
+**Implementation Status:** Complete and tested (134 tests passing)
 
 | Component | Status |
 |-----------|--------|
@@ -20,6 +20,8 @@ A browser extension that bidirectionally syncs a Linkwarden collection (and subc
 | Path-based duplicate handling | ✅ Complete |
 | Deterministic builds | ✅ Complete |
 | Cross-browser support (MV3) | ✅ Complete |
+| **Bookmark order preservation** | ✅ Complete |
+| **Optimized fetch with retry logic** | ✅ Complete |
 
 ### Linkwarden API
 - **Base URL**: `{instance}/api/v1`
@@ -37,33 +39,59 @@ A browser extension that bidirectionally syncs a Linkwarden collection (and subc
 
 ## 2. Architecture
 
+### 2.1 System Overview
+
+```mermaid
+flowchart TB
+    subgraph Browser["Browser Extension"]
+        subgraph UI["User Interface"]
+            Popup["Popup UI<br/>(Preact + Tailwind)"]
+        end
+        
+        subgraph Background["Background Service Worker"]
+            Engine["Sync Engine"]
+        end
+        
+        subgraph Storage["Browser Storage"]
+            Local["chrome.storage.local<br/>(unlimitedStorage)"]
+            Bookmarks["chrome.bookmarks API"]
+        end
+    end
+    
+    subgraph Server["Linkwarden Server"]
+        API["REST API<br/>/api/v1/collections<br/>/api/v1/links"]
+    end
+    
+    Popup -->|Settings & Commands| Engine
+    Engine -->|Read/Write| Local
+    Engine -->|Read/Write| Bookmarks
+    Engine <-->|HTTP REST<br/>Bearer Token| API
+    
+    style Engine fill:#f9f,stroke:#333,stroke-width:2px
+    style API fill:#bbf,stroke:#333,stroke-width:2px
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Browser Extension                         │
-│  ┌─────────────┐  ┌──────────────┐                          │
-│  │  Background │  │   Popup UI   │                          │
-│  │   Service   │  │  (Settings)  │                          │
-│  │   Worker    │  │              │                          │
-│  └──────┬──────┘  └──────────────┘                          │
-│         │                                                    │
-│  ┌──────▼─────────────────────────────────────────────────┐ │
-│  │           Sync Engine (Core Logic)                      │ │
-│  │  - Change Detection  - Conflict Resolution              │ │
-│  │  - Mapping Layer     - Sync Scheduling                  │ │
-│  └──────┬─────────────────────────────────────────────────┘ │
-│         │                                                    │
-│  ┌──────▼──────────────┐  ┌──────────────────────────────┐  │
-│  │  chrome.bookmarks   │  │   chrome.storage.local       │  │
-│  │       API           │  │   (unlimitedStorage)         │  │
-│  └─────────────────────┘  └──────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            │ HTTP REST (Bearer Token)
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Linkwarden Server                         │
-│  /api/v1/collections, /api/v1/links, /api/v1/search         │
-└─────────────────────────────────────────────────────────────┘
+
+### 2.2 Sync Engine Modules
+
+```mermaid
+flowchart LR
+    SyncEngine["SyncEngine<br/>(Orchestrator)"]
+    
+    subgraph Modules["Sync Modules"]
+        BrowserChanges["BrowserChangeApplier<br/>browser → server"]
+        RemoteSync["RemoteSync<br/>server → browser"]
+        Initializer["SyncInitializer<br/>first-time setup"]
+        Orphans["OrphanCleanup<br/>remove deleted items"]
+        Comparator["SyncComparator<br/>detect changes"]
+    end
+    
+    SyncEngine --> BrowserChanges
+    SyncEngine --> RemoteSync
+    SyncEngine --> Initializer
+    SyncEngine --> Orphans
+    SyncEngine --> Comparator
+    
+    style SyncEngine fill:#f9f,stroke:#333,stroke-width:2px
 ```
 
 **Storage:** `chrome.storage.local` with `unlimitedStorage` permission (no quota limits)
@@ -74,12 +102,60 @@ A browser extension that bidirectionally syncs a Linkwarden collection (and subc
 
 **Strategy:** Last-Write-Wins with Checksum Validation
 
+### 3.1 Conflict Resolution Flow
+
+```mermaid
+flowchart TD
+    Start["Conflict Detected"]
+    ComputeChecksum["Compute remote checksum"]
+    CompareChecksums{"Checksums<br/>match?"}
+    NoOp["no-op<br/>No action needed"]
+    
+    CompareTimestamps{"Remote timestamp<br/>> Browser timestamp?"}
+    UseRemote["use-remote<br/>Linkwarden wins"]
+    UseLocalNewer{"Browser timestamp<br/>> Remote timestamp?"}
+    UseLocal["use-local<br/>Browser wins"]
+    UseLocalTie["use-local<br/>Tie: Browser wins"]
+    
+    Start --> ComputeChecksum
+    ComputeChecksum --> CompareChecksums
+    CompareChecksums -->|Yes| NoOp
+    CompareChecksums -->|No| CompareTimestamps
+    CompareTimestamps -->|Yes| UseRemote
+    CompareTimestamps -->|No| UseLocalNewer
+    UseLocalNewer -->|Yes| UseLocal
+    UseLocalNewer -->|No (Tie)| UseLocalTie
+    
+    style NoOp fill:#9f9,stroke:#333
+    style UseRemote fill:#ff9,stroke:#333
+    style UseLocal fill:#ff9,stroke:#333
+    style UseLocalTie fill:#ff9,stroke:#333
+```
+
+### 3.2 Implementation
+
 ```typescript
-function resolveConflict(local: Mapping, remote: LinkwardenItem) {
-  if (local.checksum === computeChecksum(remote)) return "no-op";
-  if (remote.updatedAt > local.browserUpdatedAt) return "use-remote";
-  if (local.browserUpdatedAt > remote.updatedAt) return "use-local";
-  return "use-local"; // Timestamp tie: browser wins
+function resolveConflict(
+  local: Mapping,
+  remote: { name?: string; url?: string; updatedAt: string }
+): ConflictResult {
+  const remoteUpdatedAt = new Date(remote.updatedAt).getTime();
+
+  // 1. If checksums match, no conflict
+  const remoteChecksum = computeChecksum(remote);
+  if (local.checksum === remoteChecksum) {
+    return "no-op";
+  }
+
+  // 2. Last-write-wins based on updatedAt timestamp
+  if (remoteUpdatedAt > local.browserUpdatedAt) {
+    return "use-remote"; // Linkwarden wins
+  } else if (local.browserUpdatedAt > remoteUpdatedAt) {
+    return "use-local"; // Browser wins
+  }
+
+  // 3. Exact timestamp tie: prefer browser (user's immediate action)
+  return "use-local";
 }
 ```
 
@@ -89,35 +165,119 @@ function resolveConflict(local: Mapping, remote: LinkwardenItem) {
 
 ## 4. Sync Algorithm
 
-**Initial Sync:**
+### 4.1 Sync Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Popup as Popup UI
+    participant Engine as SyncEngine
+    participant Storage as chrome.storage
+    participant Browser as chrome.bookmarks
+    participant API as Linkwarden API
+    
+    User->>Popup: Trigger sync
+    Popup->>Engine: sync()
+    
+    Engine->>Storage: Get sync metadata
+    alt No metadata
+        Engine-->>Popup: Error: Not configured
+    end
+    
+    Engine->>Engine: Scan unmapped bookmarks
+    Engine->>Storage: Get pending changes
+    loop For each pending change
+        Engine->>Browser: Apply browser change
+        Engine->>API: Update Linkwarden
+        Engine->>Storage: Mark change resolved
+    end
+    
+    Engine->>API: Fetch collection tree
+    Engine->>Browser: Sync links/folders
+    Engine->>Storage: Update mappings
+    
+    Engine->>Storage: Update lastSyncTime
+    Engine->>Storage: Cleanup resolved changes
+    Engine-->>Popup: Sync complete
+```
+
+### 4.2 Initial Sync
+
 1. Fetch target collection + subcollections recursively
 2. Create matching browser folder structure
 3. Populate `mappings` table
 4. Record `lastSyncTime`
 
-**Incremental Sync:**
+### 4.3 Incremental Sync
+
 1. **Detect** - Query Linkwarden + browser, compare via checksums/timestamps
 2. **Resolve** - Apply LWW strategy, queue actions
 3. **Apply** - Deletions (bottom-up) → Creations (top-down) → Updates
 4. **Update** - Refresh mappings table
 
-**Change Detection:**
-- **Browser → Linkwarden**: Listen to `chrome.bookmarks.onCreated/Changed/Removed/Moved`
-- **Linkwarden → Browser**: Poll on interval (default 5 min), compare `updatedAt`
+### 4.4 Change Detection
+
+| Direction | Mechanism |
+|-----------|-----------|
+| **Browser → Linkwarden** | Listen to `chrome.bookmarks.onCreated/Changed/Removed/Moved` events |
+| **Linkwarden → Browser** | Poll on interval (default 5 min), compare `updatedAt` timestamps |
+
+### 4.5 Sync Statistics
+
+The `SyncStats` class tracks sync operations:
+
+```typescript
+interface SyncStatsObject {
+  created: number;   // Items created
+  updated: number;   // Items updated
+  deleted: number;   // Items deleted
+  skipped: number;   // Items skipped (no changes)
+}
+```
 
 ---
 
 ## 5. Technical Stack
 
-| Component | Technology |
-|-----------|------------|
-| Extension | Manifest V3 (Chrome, Firefox 128+, Edge) |
-| Language | TypeScript |
-| Storage | `chrome.storage.local` + `unlimitedStorage` |
-| Bundler | Bun (`bun build`) |
-| Test Runner | Bun test (`bun:test`) |
-| UI Framework | Preact (popup) |
-| Styling | Tailwind CSS v4 (utility-first CSS) |
+| Component | Technology | Version |
+|-----------|------------|---------|
+| **Extension** | Manifest V3 | Chrome, Firefox 128+, Edge |
+| **Language** | TypeScript | 5.x |
+| **Runtime** | Bun | 1.3.9 |
+| **Storage** | chrome.storage.local | unlimitedStorage permission |
+| **UI Framework** | Preact | 10.28.4 |
+| **Styling** | Tailwind CSS v4 | 4.2.1 |
+| **Bundler** | Bun build | Native |
+| **Test Runner** | Bun test | bun:test |
+| **Linting** | ESLint | 10.x |
+| **Formatting** | Prettier | 3.8.1 |
+
+### 5.1 Dependencies
+
+```mermaid
+flowchart LR
+    subgraph Runtime["Runtime Dependencies"]
+        Preact["Preact 10.28.4<br/>UI framework"]
+    end
+    
+    subgraph Dev["Development Dependencies"]
+        Bun["Bun 1.3.9<br/>Runtime & bundler"]
+        TS["TypeScript 5.x<br/>Type safety"]
+        Tailwind["Tailwind CSS 4.2.1<br/>Styling"]
+        ESLint["ESLint 10.x<br/>Linting"]
+        Prettier["Prettier 3.8.1<br/>Formatting"]
+    end
+    
+    subgraph Types["Type Definitions"]
+        Chrome["@types/chrome<br/>Browser API types"]
+        Node["@types/node<br/>Node.js types"]
+        Bun["bun-types<br/>Bun types"]
+    end
+    
+    Bun --> Runtime
+    Bun --> Dev
+    Bun --> Types
+```
 
 ---
 
@@ -128,15 +288,17 @@ lwsync/
 ├── package.json           # Scripts: build, dev, zip, verify, test
 ├── bunfig.toml            # Bun build config
 ├── tsconfig.json          # TypeScript config
+├── Containerfile          # Reproducible build container
+├── env.example            # Environment variables template
 ├── DESIGN.md              # This document
 ├── README.md              # User documentation
-├── MEMORY.md              # Session notes
 ├── AGENTS.md              # Quick reference
 ├── assets/
-│   ├── manifest.json      # Chrome MV3
-│   ├── manifest.firefox.json  # Firefox MV3 (128+)
-│   ├── popup.html         # Settings UI
-│   └── icon*.png          # Extension icons
+│   ├── manifest.json      # Chrome MV3 manifest
+│   ├── manifest.firefox.json  # Firefox MV3 manifest
+│   ├── popup.html         # Settings UI entry point
+│   ├── icon*.png          # Extension icons (16, 48, 128)
+│   └── styles.css         # Tailwind CSS entry point
 ├── scripts/
 │   ├── build.ts           # Fast local build
 │   ├── build-prod.ts      # Containerized reproducible build
@@ -146,48 +308,114 @@ lwsync/
 │   ├── background.ts      # Service worker (MV3)
 │   ├── darkmode.ts        # Dark mode content script
 │   ├── popup.tsx          # Popup UI (Preact)
-│   ├── sync.ts            # Core sync engine
 │   ├── api.ts             # Linkwarden API client
 │   ├── bookmarks.ts       # Bookmarks API wrapper
-│   ├── browser.ts         # Browser detection
-│   ├── storage/           # Storage wrapper
-│   ├── hooks/             # Preact hooks
-│   ├── popup/             # Popup modules
-│   │   ├── components/    # UI components (Button, Input, Section, etc.)
-│   │   ├── sections/      # Page sections (ServerCollection, SyncSettings, etc.)
-│   │   ├── hooks/         # Custom hooks (useSettings, useSyncStatus, etc.)
+│   ├── browser.ts         # Browser detection utilities
+│   ├── config.ts          # Centralized configuration
+│   ├── storage/           # Storage wrapper module
+│   │   ├── index.ts       # Barrel exports
+│   │   ├── main.ts        # Core storage operations
+│   │   ├── batch.ts       # Batch operations
+│   │   └── transaction.ts # Transaction support
+│   ├── sync/              # Sync engine modules
+│   │   ├── index.ts       # Barrel exports
+│   │   ├── engine.ts      # Main SyncEngine orchestrator
+│   │   ├── browser-changes.ts  # Browser → Server sync
+│   │   ├── remote-sync.ts      # Server → Browser sync
+│   │   ├── initialization.ts   # First-time sync setup
+│   │   ├── orphans.ts          # Cleanup deleted items
+│   │   ├── comparator.ts       # Change detection
+│   │   ├── collections.ts      # Collection sync
+│   │   ├── links.ts            # Link sync
+│   │   ├── mappings.ts         # Mapping operations
+│   │   ├── moves.ts            # Folder move handling
+│   │   ├── conflict.ts         # Conflict resolution
+│   │   └── errorReporter.ts    # Error collection
+│   ├── popup/             # Popup UI modules
+│   │   ├── components/    # Feature components
+│   │   ├── sections/      # Page sections
+│   │   ├── hooks/         # Custom Preact hooks
 │   │   ├── ui/            # Reusable UI primitives
-│   │   └── styles.css     # Tailwind CSS v4 styles
-│   ├── sync/              # Sync modules
-│   ├── types/             # TypeScript types
-│   ├── utils/             # Utilities
-│   └── logger.ts          # Sync logging
+│   │   └── styles.css     # Tailwind CSS v4 entry
+│   ├── types/             # TypeScript type definitions
+│   ├── utils/             # Utility functions
+│   └── logger.ts          # Logging utilities
 ├── tests/
 │   ├── fixtures/          # Test data factories
 │   ├── mocks/             # Mock implementations
+│   ├── builders/          # Test data builders
 │   ├── utils/             # Test utilities
-│   ├── sync.test.ts       # Unit tests (pure functions)
-│   ├── api.e2e.test.ts    # API E2E (real Linkwarden)
-│   ├── sync.integration.test.ts  # Integration tests
-│   └── storage.test.ts    # Storage unit tests
+│   ├── sync.test.ts       # Unit tests (pure functions, 28 tests)
+│   ├── storage.test.ts    # Storage unit tests (21 tests)
+│   ├── api.e2e.test.ts    # API E2E tests (8 tests)
+│   └── sync.integration.test.ts  # Integration tests (62 tests)
 └── dist/
-    ├── chrome/            # Chrome/Edge build
-    └── firefox/           # Firefox build
+    ├── chrome/            # Chrome/Edge build output
+    └── firefox/           # Firefox build output
+```
+
+### 6.1 Source Code Module Dependencies
+
+```mermaid
+flowchart LR
+    subgraph Entry["Entry Points"]
+        Background["background.ts"]
+        Popup["popup.tsx"]
+    end
+    
+    subgraph Core["Core Modules"]
+        SyncEngine["sync/engine.ts"]
+        API["api.ts"]
+        Storage["storage/"]
+    end
+    
+    subgraph Sync["Sync Modules"]
+        BrowserChanges["browser-changes.ts"]
+        RemoteSync["remote-sync.ts"]
+        Comparator["comparator.ts"]
+    end
+    
+    subgraph UI["UI Modules"]
+        PopupUI["popup/"]
+        Hooks["hooks/"]
+    end
+    
+    Background --> SyncEngine
+    Background --> API
+    Background --> Storage
+    
+    Popup --> PopupUI
+    PopupUI --> Hooks
+    Hooks --> Storage
+    Hooks --> API
+    
+    SyncEngine --> BrowserChanges
+    SyncEngine --> RemoteSync
+    SyncEngine --> Comparator
+    SyncEngine --> Storage
+    SyncEngine --> API
+    
+    style SyncEngine fill:#f9f,stroke:#333,stroke-width:2px
+    style API fill:#bbf,stroke:#333,stroke-width:2px
+    style Storage fill:#bbf,stroke:#333,stroke-width:2px
 ```
 
 ---
 
 ## 7. Implementation Status
 
-| Phase | Feature | Status |
-|-------|---------|--------|
-| **Phase 1** | Foundation (manifest, storage, API client, settings UI) | ✅ Complete |
-| **Phase 2** | One-way sync (Linkwarden → Browser) | ✅ Complete |
-| **Phase 3** | Bidirectional sync + conflict resolution | ✅ Complete |
-| **Phase 4** | Polish (error handling, logging, deduplication, path-based matching) | ✅ Complete |
-| **Phase 5** | Build infrastructure (deterministic builds, checksums) | ✅ Complete |
-| **Phase 6** | Firefox MV3 migration | ✅ Complete |
-| **Phase 7** | UI refactoring + Tailwind CSS v4 migration | ✅ Complete |
+| Phase | Feature | Status | Tests |
+|-------|---------|--------|-------|
+| **Phase 1** | Foundation (manifest, storage, API client, settings UI) | ✅ Complete | - |
+| **Phase 2** | One-way sync (Linkwarden → Browser) | ✅ Complete | - |
+| **Phase 3** | Bidirectional sync + conflict resolution | ✅ Complete | 28 unit + 62 integration |
+| **Phase 4** | Polish (error handling, logging, deduplication, path-based matching) | ✅ Complete | - |
+| **Phase 5** | Build infrastructure (deterministic builds, checksums) | ✅ Complete | - |
+| **Phase 6** | Firefox MV3 migration | ✅ Complete | - |
+| **Phase 7** | UI refactoring + Tailwind CSS v4 migration | ✅ Complete | - |
+| **Phase 8** | Test suite consolidation | ✅ Complete | 119 total |
+| **Phase 9** | Bookmark order preservation | ✅ Complete | 13 order tests |
+| **Phase 10** | Optimized fetch + API compliance | ✅ Complete | 134 total |
 
 ---
 
@@ -207,14 +435,109 @@ lwsync/
 | 10 | Graceful 409 handling | 409 = expected, create mapping and continue |
 | 11 | Tailwind CSS v4 for styling | Utility-first CSS, minimal custom styles, fast builds |
 | 12 | Modular UI components | Refactored monolithic popup into reusable components |
+| 13 | Modular sync engine | Separation of concerns: browser-changes, remote-sync, comparator, etc. |
+| 14 | Centralized configuration | Single source of truth for all magic numbers |
+| 15 | Error reporter pattern | Collect and report errors without failing entire sync |
+| 16 | Consolidated test suite | 134 tests, no duplicates, comprehensive coverage |
+| 17 | **Local order storage (`browserIndex`)** | Preserve bookmark order without server-side hacks |
+| 18 | **Only documented APIs** | Use supported endpoints, avoid undocumented features |
+| 19 | **Retry logic for `/search`** | Handle eventual consistency in search index |
 
 ---
 
-## 9. Duplicate Handling
+## 10. Storage Schema
 
-**Problem:** Linkwarden, Chrome, and Firefox allow duplicate folder names under the same parent.
+### 10.1 Data Structure
 
-**Solution: Three-Tier Strategy**
+```mermaid
+erDiagram
+    SyncMetadata {
+        string id
+        number lastSyncTime
+        string syncDirection
+        number targetCollectionId
+        string browserRootFolderId
+    }
+    
+    Mapping {
+        string id
+        string linkwardenType
+        number linkwardenId
+        string browserId
+        number linkwardenUpdatedAt
+        number browserUpdatedAt
+        number lastSyncedAt
+        string checksum
+        number browserIndex  // Optional: position in parent folder
+    }
+    
+    PendingChange {
+        string id
+        string type
+        string source
+        number linkwardenId
+        string browserId
+        number parentId
+        object data
+        number timestamp
+        boolean resolved
+    }
+    
+    Settings {
+        string serverUrl
+        string accessToken
+        number syncInterval
+        number targetCollectionId
+        string targetCollectionName
+        string browserFolderName
+    }
+    
+    LogEntry {
+        number timestamp
+        string type
+        string message
+    }
+    
+    SectionState {
+        string sectionId
+        boolean isExpanded
+    }
+    
+    SyncMetadata ||--o{ Mapping : "tracks"
+    SyncMetadata ||--o{ PendingChange : "queues"
+    Settings ||--o| SyncMetadata : "configures"
+```
+
+### 10.2 Storage Keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `sync_metadata` | `SyncMetadata \| null` | Last sync time, sync direction, target IDs |
+| `mappings` | `Mapping[]` | Linkwarden ↔ Browser ID mappings |
+| `pending_changes` | `PendingChange[]` | Queue of changes to process |
+| `settings` | `Settings \| null` | User configuration |
+| `sync_log` | `LogEntry[]` | Recent sync activity (max 100 entries) |
+| `section_state` | `SectionState` | UI collapse/expand state |
+
+### 10.3 Mapping Types
+
+```typescript
+type LinkwardenType = "link" | "collection";
+
+interface Mapping {
+  id: string;                    // Unique mapping ID
+  linkwardenType: LinkwardenType; // "link" or "collection"
+  linkwardenId: number;          // Linkwarden item ID
+  browserId: string;             // Browser bookmark/folder ID
+  linkwardenUpdatedAt: number;   // Timestamp from Linkwarden
+  browserUpdatedAt: number;      // Timestamp from browser
+  lastSyncedAt: number;          // Last successful sync time
+  checksum: string;              // SHA-256 of name + url
+  browserIndex?: number;         // Optional: Track position in parent folder (order preservation)
+}
+```
+
+## 11. Duplicate Handling
 
 | Tier | Strategy | Use Case |
 |------|----------|----------|
@@ -247,7 +570,7 @@ lwsync/
 
 ---
 
-## 10. Folder Moves
+## 12. Folder Moves
 
 **Token Format:** `{LW:MOVE:{"to":parentId,"ts":timestamp}}`
 
@@ -265,7 +588,7 @@ lwsync/
 
 ---
 
-## 11. Tailwind CSS v4 Migration
+## 13. Tailwind CSS v4 Migration
 
 **Status:** ✅ Complete (v4.2.1)
 
@@ -317,7 +640,7 @@ src/popup/
 
 ---
 
-## 13. Sync Flow
+## 14. Sync Flow
 
 **User triggers sync → Background worker:**
 1. Get pending changes from storage
@@ -330,7 +653,7 @@ src/popup/
 
 ---
 
-## 14. Development Watch Mode
+## 15. Development Watch Mode
 
 **Status:** ✅ Complete
 
@@ -355,7 +678,7 @@ bun run dev
 
 ---
 
-## 15. Testing
+## 16. Testing
 
 **Rule:** Never mock the system-under-test. Only mock browser APIs that don't exist in test environment.
 
@@ -364,15 +687,31 @@ bun run dev
 | **Unit** | `tests/sync.test.ts` | 28 | Pure functions (conflict, checksums, move tokens) | None |
 | **Unit** | `tests/storage.test.ts` | 21 | Storage wrapper | `chrome.storage` |
 | **API E2E** | `tests/api.e2e.test.ts` | 8 | Linkwarden API client | None (real API) |
-| **Integration** | `tests/sync.integration.test.ts` | 48 | Sync engine round-trip | Browser APIs |
+| **Integration** | `tests/sync.integration.test.ts` | 62 | Sync engine round-trip | Browser APIs |
 
-**Total:** 105 tests passing
+**Total:** 119 tests passing
 
 **Run:** `bun test` (all), `bun test tests/sync.test.ts` (unit only)
 
+**Test Suite Structure:**
+- **Unit tests** - Pure functions, no mocks
+- **Storage tests** - Storage wrapper with `MockStorage`
+- **API E2E tests** - Real Linkwarden server calls
+- **Integration tests** - Full sync engine with mocked browser APIs
+  - Initial sync
+  - Incremental sync
+  - Conflict resolution
+  - Browser → Server sync
+  - Server → Browser sync
+  - Bookmark scanner (unmapped items)
+  - Duplicate handling
+  - Folder moves
+  - Subcollections
+  - Performance (100+ items)
+
 ---
 
-## 16. Deterministic Builds
+## 17. Deterministic Builds
 
 **Output:** `dist/LWSync-{chrome|firefox}.zip` + `.sha256sum` checksums
 
@@ -392,7 +731,7 @@ bun run dev
 
 ---
 
-## 17. Session Notes (MEMORY.md)
+## 18. Session Notes
 
 **Purpose:** Task-level project notebook for pause/resume without context loss.
 
@@ -406,6 +745,6 @@ bun run dev
 
 ---
 
-## 18. Reference
+## 19. Reference
 
 **Related:** `tests/TEST_DESIGN.md` - Test suite design document

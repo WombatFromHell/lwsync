@@ -57,21 +57,31 @@ export class CollectionSync {
 
   /**
    * Sync a collection and its subcollections
+   * @param collection - The collection to sync
+   * @param parentBrowserId - The browser folder ID to sync into
+   * @param caches - Collection and bookmark caches
+   * @param stats - Sync statistics
+   * @param isRootCollection - If true, don't create a folder for this collection (sync links directly to parent)
+   * @param lastSyncTime - The time of the previous sync (for detecting user reorders)
    */
   async syncCollection(
     collection: LinkwardenCollection,
     parentBrowserId: string,
     caches: CollectionCaches,
-    stats: SyncStats
+    stats: SyncStats,
+    isRootCollection: boolean = false,
+    lastSyncTime?: number
   ): Promise<void> {
     try {
-      // Sync the collection folder itself
-      const folderId = await this.syncCollectionFolder(
-        collection,
-        parentBrowserId,
-        caches,
-        stats
-      );
+      // Sync the collection folder itself (skip for root collection)
+      const folderId = isRootCollection
+        ? parentBrowserId // Root collection: sync links directly to browser root
+        : await this.syncCollectionFolder(
+            collection,
+            parentBrowserId,
+            caches,
+            stats
+          );
 
       // Sync links in this collection
       if (collection.links && collection.links.length > 0) {
@@ -80,13 +90,25 @@ export class CollectionSync {
           // For now, inline the sync logic
           await this.syncLinkInline(link, folderId, stats);
         }
+
+        // Restore bookmark order after all links are synced
+        await this.restoreOrder(folderId, stats, "link", lastSyncTime);
       }
 
       // Sync subcollections
       if (collection.collections && collection.collections.length > 0) {
         for (const subCollection of collection.collections) {
-          await this.syncSubCollection(subCollection, folderId, caches, stats);
+          await this.syncSubCollection(
+            subCollection,
+            folderId,
+            caches,
+            stats,
+            lastSyncTime
+          );
         }
+
+        // Restore folder order after all subcollections are synced
+        await this.restoreOrder(folderId, stats, "collection", lastSyncTime);
       }
     } catch (error) {
       this.errors.collect(
@@ -106,9 +128,17 @@ export class CollectionSync {
     subCollection: LinkwardenCollection,
     parentBrowserId: string,
     caches: CollectionCaches,
-    stats: SyncStats
+    stats: SyncStats,
+    lastSyncTime?: number
   ): Promise<void> {
-    await this.syncCollection(subCollection, parentBrowserId, caches, stats);
+    await this.syncCollection(
+      subCollection,
+      parentBrowserId,
+      caches,
+      stats,
+      false,
+      lastSyncTime
+    );
   }
 
   /**
@@ -263,6 +293,7 @@ export class CollectionSync {
         stats.increment("updated");
       }
     }
+    // Note: Order restoration is done separately in restoreOrder()
 
     // Check for server-side folder move (parentId changed without move token)
     if (collection.parentId !== undefined && !moveTokenProcessed) {
@@ -342,7 +373,7 @@ export class CollectionSync {
 
   /**
    * Inline link sync (to avoid circular dependency with links.ts)
-   * TODO: Refactor to use links module properly
+   * Syncs a single link, but does NOT restore order - that's done separately
    */
   private async syncLinkInline(
     link: { id: number; name: string; url: string; updatedAt: string },
@@ -365,6 +396,7 @@ export class CollectionSync {
           await storage.upsertMapping(existing);
           stats.increment("updated");
         }
+        // Note: Order restoration is done separately in restoreOrder()
       } else {
         // Check if bookmark already exists
         const existingBookmarks = await bookmarks.search(link.url);
@@ -386,6 +418,7 @@ export class CollectionSync {
               Date.now(),
             lastSyncedAt: Date.now(),
             checksum: computeChecksum(link),
+            browserIndex: matchingBookmark.index, // Capture existing index
           };
           await storage.upsertMapping(mapping);
         } else {
@@ -405,6 +438,7 @@ export class CollectionSync {
             browserUpdatedAt: node.dateAdded || Date.now(),
             lastSyncedAt: Date.now(),
             checksum: computeChecksum(link),
+            browserIndex: node.index, // Capture initial index
           };
           await storage.upsertMapping(mapping);
           stats.increment("created");
@@ -416,6 +450,187 @@ export class CollectionSync {
         createErrorContext("syncLinkInline", {
           itemId: link.id,
           itemName: link.name,
+        })
+      );
+    }
+  }
+
+  /**
+   * Restore bookmark/folder order based on browserIndex mappings
+   * Called after all items are synced to reorder efficiently
+   * Also detects and captures user reorders (when browser is newer than last sync)
+   * @param lastSyncTime - The time of the previous sync (from metadata), used to detect user reorders
+   */
+  private async restoreOrder(
+    parentBrowserId: string,
+    stats: SyncStats,
+    type: "link" | "collection" = "link",
+    lastSyncTime?: number
+  ): Promise<void> {
+    try {
+      // Get current order in the folder first
+      const currentChildren = await bookmarks.getChildren(parentBrowserId);
+
+      if (currentChildren.length === 0) {
+        return; // Nothing in folder
+      }
+
+      // Get all mappings and filter to only those in this parent folder
+      const allMappings = await storage.getMappings();
+      const currentIds = new Set(currentChildren.map((child) => child.id));
+      const parentMappings = allMappings.filter(
+        (m) =>
+          m.linkwardenType === type &&
+          m.browserId &&
+          currentIds.has(m.browserId)
+      );
+
+      if (parentMappings.length === 0) {
+        return; // No items to restore order for
+      }
+
+      // Build map of current browser order
+      const currentOrderMap = new Map<string, number>();
+      currentChildren.forEach((child, index) => {
+        currentOrderMap.set(child.id, index);
+      });
+
+      // Check if current browser order matches stored browserIndex
+      let hasMismatch = false;
+      let hasStoredOrder = false;
+      let browserIsNewer = false;
+
+      for (const mapping of parentMappings) {
+        if (mapping.browserIndex !== undefined) {
+          hasStoredOrder = true;
+        }
+        const currentPos = currentOrderMap.get(mapping.browserId);
+        if (currentPos !== undefined && mapping.browserIndex !== currentPos) {
+          hasMismatch = true;
+        }
+        // Check if browser was modified after last sync (user reorder)
+        // Use the bookmark's dateGroupModified field for accurate detection
+        // Note: lastSyncTime can be 0 for first sync, so use >= 0 check
+        if (lastSyncTime !== undefined && lastSyncTime >= 0) {
+          const bookmark = await bookmarks.get(mapping.browserId);
+          if (bookmark && bookmark.dateGroupModified) {
+            logger.debug("Checking reorder:", {
+              bookmarkId: mapping.browserId,
+              dateGroupModified: bookmark.dateGroupModified,
+              lastSyncTime,
+              isNewer: bookmark.dateGroupModified > lastSyncTime,
+            });
+            if (bookmark.dateGroupModified > lastSyncTime) {
+              browserIsNewer = true;
+            }
+          }
+        } else if (lastSyncTime === undefined) {
+          // No lastSyncTime available - assume browser is newer (first sync scenario)
+          browserIsNewer = true;
+        }
+      }
+
+      logger.debug("Order check result:", {
+        hasMismatch,
+        hasStoredOrder,
+        browserIsNewer,
+        lastSyncTime,
+      });
+
+      if (hasMismatch) {
+        // Mismatch detected - decide whether to capture or restore
+        if (browserIsNewer && hasStoredOrder) {
+          // Browser was modified after last sync - user reordered, capture new order
+          for (let i = 0; i < currentChildren.length; i++) {
+            const child = currentChildren[i];
+            const mapping = parentMappings.find(
+              (m) => m.browserId === child.id
+            );
+            if (mapping) {
+              mapping.browserIndex = i;
+              await storage.upsertMapping(mapping);
+            }
+          }
+          logger.debug("Captured user reorder (browser newer):", {
+            parentId: parentBrowserId,
+            type,
+            count: currentChildren.length,
+          });
+        } else if (hasStoredOrder) {
+          // Browser not newer - restore stored order (LWW: stored order wins)
+          const orderedMappings = parentMappings
+            .filter((m) => m.browserIndex !== undefined)
+            .sort((a, b) => a.browserIndex! - b.browserIndex!);
+
+          const currentOrder = currentChildren.map((child) => child.id);
+          const targetOrder = orderedMappings.map((m) => m.browserId);
+
+          // Check if reordering is actually needed
+          const needsReorder = currentOrder.some(
+            (id, index) => id !== targetOrder[index]
+          );
+
+          if (!needsReorder) {
+            logger.debug("Order already correct:", {
+              parentId: parentBrowserId,
+              type,
+            });
+            return;
+          }
+
+          // Build reorder operations
+          const reorderOps = orderedMappings.map((mapping, targetIndex) => ({
+            id: mapping.browserId,
+            targetIndex,
+          }));
+
+          logger.info("Restoring order:", {
+            parentId: parentBrowserId,
+            type,
+            count: reorderOps.length,
+          });
+
+          // Execute batch reorder
+          await bookmarks.reorderWithinFolder(reorderOps, parentBrowserId);
+
+          stats.increment("updated");
+          logger.debug("Order restored:", {
+            parentId: parentBrowserId,
+            type,
+            targetOrder: targetOrder,
+          });
+        } else {
+          // No stored order - capture current browser order
+          for (let i = 0; i < currentChildren.length; i++) {
+            const child = currentChildren[i];
+            const mapping = parentMappings.find(
+              (m) => m.browserId === child.id
+            );
+            if (mapping) {
+              mapping.browserIndex = i;
+              await storage.upsertMapping(mapping);
+            }
+          }
+          logger.debug("Captured initial order:", {
+            parentId: parentBrowserId,
+            type,
+            count: currentChildren.length,
+          });
+        }
+        return;
+      }
+
+      // No mismatch - order is already correct
+      logger.debug("Order already correct:", {
+        parentId: parentBrowserId,
+        type,
+      });
+    } catch (error) {
+      this.errors.collect(
+        error as Error,
+        createErrorContext("restoreOrder", {
+          itemId: parentBrowserId,
+          data: { type },
         })
       );
     }

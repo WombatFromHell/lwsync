@@ -171,4 +171,72 @@ export class OrphanCleanup {
   getErrorReporter(): SyncErrorReporter {
     return this.errors;
   }
+
+  /**
+   * Normalize browserIndex values after deletions
+   * Ensures indices are sequential (0, 1, 2, ...) within each parent folder
+   */
+  async normalizeIndices(browserRootFolderId: string): Promise<void> {
+    try {
+      const allMappings = await storage.getMappings();
+
+      // Group mappings by parent folder
+      const byParent = new Map<string, Mapping[]>();
+
+      for (const mapping of allMappings) {
+        // Get the bookmark to find its parent
+        const node = await bookmarks.get(mapping.browserId);
+        if (!node) continue; // Bookmark was deleted
+
+        const parentId = node.parentId || "unknown";
+        const group = byParent.get(parentId) || [];
+        group.push(mapping);
+        byParent.set(parentId, group);
+      }
+
+      // Normalize indices within each parent
+      for (const [parentId, group] of byParent.entries()) {
+        if (group.length === 0) continue;
+
+        // Get current order in the folder
+        const children = await bookmarks.getChildren(parentId);
+        const childOrder = new Map<string, number>();
+        children.forEach((child, index) => {
+          childOrder.set(child.id, index);
+        });
+
+        // Sort mappings by current position in folder
+        group.sort((a, b) => {
+          const aIndex = childOrder.get(a.browserId) ?? 999;
+          const bIndex = childOrder.get(b.browserId) ?? 999;
+          return aIndex - bIndex;
+        });
+
+        // Assign sequential indices based on current order
+        let hasChanges = false;
+        for (let i = 0; i < group.length; i++) {
+          if (group[i].browserIndex !== i) {
+            group[i].browserIndex = i;
+            hasChanges = true;
+          }
+        }
+
+        // Save updated mappings
+        if (hasChanges) {
+          for (const mapping of group) {
+            await storage.upsertMapping(mapping);
+          }
+          logger.debug("Normalized indices in folder:", {
+            parentId,
+            count: group.length,
+          });
+        }
+      }
+    } catch (error) {
+      this.errors.collect(
+        error as Error,
+        createErrorContext("normalizeIndices")
+      );
+    }
+  }
 }

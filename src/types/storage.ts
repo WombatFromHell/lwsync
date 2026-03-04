@@ -23,6 +23,7 @@ export interface Mapping {
   browserUpdatedAt: number;
   lastSyncedAt: number;
   checksum: string;
+  browserIndex?: number; // Track position in parent folder for order restoration
 }
 
 export interface PendingChange {
@@ -32,6 +33,9 @@ export interface PendingChange {
   linkwardenId?: number;
   browserId?: string;
   parentId?: number | string;
+  index?: number; // Position in parent (for reorder operations)
+  oldParentId?: number | string; // Previous parent (to detect reorder vs move)
+  oldIndex?: number; // Previous position (for reorder operations)
   data?: { url?: string; title?: string };
   timestamp: number;
   resolved: boolean;
@@ -47,7 +51,10 @@ export interface Settings {
   serverUrl: string;
   accessToken: string;
   syncInterval: number;
-  targetCollectionName: string;
+  /** Collection ID (preferred - unique and unambiguous) */
+  targetCollectionId?: number;
+  /** Collection name (fallback if ID not provided) */
+  targetCollectionName?: string;
   browserFolderName: string;
 }
 

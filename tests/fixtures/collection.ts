@@ -1,24 +1,34 @@
 /**
  * Test data factories for LinkwardenCollection objects
+ *
+ * Default collection ID is from TEST_COLLECTION env var (default: 114 "Unorganized").
+ * Override with `createCollection({ id: 999 })` if needed.
  */
 
 import type { LinkwardenCollection } from "../../src/api";
+import { getTestCollectionId, getTestCollectionName } from "../utils/config";
 
-let collectionCounter = 0;
+let collectionCounter = getTestCollectionId();
 
 /**
  * Create a LinkwardenCollection with sensible defaults
+ * Default ID is from TEST_COLLECTION env var ("Unorganized"), increments for subsequent collections
  */
 export function createCollection(
   overrides: Partial<LinkwardenCollection> = {}
 ): LinkwardenCollection {
-  collectionCounter++;
   const now = new Date().toISOString();
-  return {
+  const defaultId = getTestCollectionId();
+  const defaultName = getTestCollectionName();
+
+  const collection = {
     id: collectionCounter,
-    name: `Test Collection ${collectionCounter}`,
+    name:
+      collectionCounter === defaultId
+        ? defaultName
+        : `Collection ${collectionCounter}`,
     description: "",
-    color: "",
+    color: collectionCounter === defaultId ? "#0ea5e9" : "",
     isPublic: false,
     ownerId: 1,
     parentId: undefined,
@@ -28,6 +38,9 @@ export function createCollection(
     collections: [],
     ...overrides,
   };
+
+  collectionCounter++;
+  return collection;
 }
 
 /**
@@ -60,5 +73,5 @@ export function createSubcollection(
  * Reset the collection counter (call in beforeEach)
  */
 export function resetCollectionCounter(): void {
-  collectionCounter = 0;
+  collectionCounter = getTestCollectionId();
 }

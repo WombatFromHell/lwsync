@@ -10,8 +10,10 @@ LWSync is a browser extension that keeps your Linkwarden collections in sync wit
 
 - ✅ **Bidirectional sync** - Changes in Linkwarden or browser bookmarks sync automatically
 - ✅ **Subcollection support** - Nested collections sync as folder hierarchies
+- ✅ **Bookmark order preservation** - Maintains your custom bookmark arrangement
 - ✅ **Conflict resolution** - Last-write-wins with checksum validation
 - ✅ **Background sync** - Automatic sync at configurable intervals (default: 5 minutes)
+- ✅ **Optimized fetching** - Uses indexed search endpoint for better performance
 - ✅ **Privacy-first** - No data collection, no telemetry, no external services
 - ✅ **Cross-browser** - Supports Chrome, Firefox, and Edge
 
@@ -384,7 +386,10 @@ git push origin feature/your-feature
 - Subcollection support with nested folder hierarchies
 - Conflict resolution with last-write-wins strategy
 - Background sync at configurable intervals
+- **Bookmark order preservation** - Maintains custom bookmark arrangement using `browserIndex` metadata
+- **Optimized fetching** - Uses `/search` endpoint with retry logic for eventual consistency
 - Privacy-first design with no data collection
+- **134 tests passing (100%)** - Comprehensive test coverage
 
 ---
 

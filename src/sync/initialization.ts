@@ -106,14 +106,41 @@ export class SyncInitializer {
 
   /**
    * Find existing collection or create if it doesn't exist
-   * Supports nested paths like "Parent Collection/Subcollection"
+   * Supports:
+   * - Numeric ID (e.g., "42" - preferred, unique)
+   * - Collection name (e.g., "Favorites" - fallback)
+   * - Nested paths (e.g., "Parent/Subcollection")
    */
   async findOrCreateCollection(
-    name: string
+    identifier: string
   ): Promise<{ id: number; name: string } | null> {
     try {
-      // Parse the name as a path to support nested collections
-      const pathParts = parsePath(name);
+      // Check if identifier is a numeric ID
+      const numericId = parseInt(identifier, 10);
+      if (!isNaN(numericId) && identifier === numericId.toString()) {
+        // It's a numeric ID - try to fetch collection by ID
+        logger.info("Looking up collection by ID:", numericId);
+        try {
+          const collection = await this.api.getCollection(numericId);
+          logger.info("Found collection by ID:", {
+            id: collection.id,
+            name: collection.name,
+          });
+          return {
+            id: collection.id,
+            name: collection.name,
+          };
+        } catch (error) {
+          logger.warn("Collection ID not found, will try by name:", {
+            id: numericId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          // If ID doesn't exist, fall through to name-based lookup
+        }
+      }
+
+      // Parse the identifier as a path to support nested collections
+      const pathParts = parsePath(identifier);
 
       if (pathParts.length === 0) {
         return null;

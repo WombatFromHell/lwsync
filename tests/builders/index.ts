@@ -189,7 +189,7 @@ export class SyncMetadataBuilder implements Builder<SyncMetadata> {
     id: "sync_state",
     lastSyncTime: Date.now(),
     syncDirection: "bidirectional",
-    targetCollectionId: 1,
+    targetCollectionId: 114, // Default to "Unorganized"
     browserRootFolderId: "1",
   };
 

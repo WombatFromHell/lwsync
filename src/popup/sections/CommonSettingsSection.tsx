@@ -60,11 +60,11 @@ export function CommonSettingsSection({
     >
       <CollectionBox
         title="Server Collection"
-        label="Target Collection Name"
+        label="Target Collection Name or ID"
         value={targetCollectionName}
         onUpdate={onUpdateTargetCollection}
-        placeholder="Bookmarks/Linkwarden"
-        helpText="Case-sensitive. Use / for nested collections. Will be created if it doesn't exist."
+        placeholder="Favorites or 42"
+        helpText='Enter collection name/id (e.g., "Favorites", or 45). Use "/" for nested paths.'
         disabled={disabled}
       />
 

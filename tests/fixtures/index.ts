@@ -8,3 +8,4 @@ export * from "./change";
 export * from "./collection";
 export * from "./link";
 export * from "./bookmark";
+export * from "./comparison";

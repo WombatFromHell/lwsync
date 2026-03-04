@@ -11,6 +11,7 @@ import { setupBrowserMocks, cleanupBrowserMocks } from "./mocks/browser";
 import { createMapping, createCollectionMapping } from "./fixtures/mapping";
 import { createSyncMetadata } from "./fixtures/metadata";
 import { createPendingChange } from "./fixtures/change";
+import { getTestCollectionName } from "./utils/config";
 
 let mocks: ReturnType<typeof setupBrowserMocks>;
 
@@ -51,7 +52,7 @@ describe("Storage: getAll/saveAll", () => {
         serverUrl: "https://example.com",
         accessToken: "token123",
         syncInterval: 5,
-        targetCollectionName: "Bookmarks",
+        targetCollectionName: getTestCollectionName(),
         browserFolderName: "Other Bookmarks",
       },
       sync_log: [
@@ -308,7 +309,7 @@ describe("Storage: Settings", () => {
       serverUrl: "https://linkwarden.example.com",
       accessToken: "secret-token-123",
       syncInterval: 10,
-      targetCollectionName: "Bookmarks",
+      targetCollectionName: getTestCollectionName(),
       browserFolderName: "Other Bookmarks",
     };
 
@@ -323,7 +324,7 @@ describe("Storage: Settings", () => {
       serverUrl: "https://original.com",
       accessToken: "token1",
       syncInterval: 5,
-      targetCollectionName: "Bookmarks",
+      targetCollectionName: getTestCollectionName(),
       browserFolderName: "Other Bookmarks",
     };
 
@@ -364,7 +365,7 @@ describe("Storage: Clear All", () => {
       serverUrl: "https://example.com",
       accessToken: "token",
       syncInterval: 5,
-      targetCollectionName: "Bookmarks",
+      targetCollectionName: getTestCollectionName(),
       browserFolderName: "Other Bookmarks",
     });
 

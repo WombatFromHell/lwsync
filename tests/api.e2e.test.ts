@@ -4,7 +4,7 @@
  *
  * Run with: bun test tests/api.e2e.test.ts
  *
- * NOTE: Tests use the COLLECTION from .env (default: "Bookmarks").
+ * NOTE: Tests use TEST_COLLECTION from .env (default: 114 "Unorganized").
  * Test links are created and cleaned up, but the collection is reused.
  */
 
@@ -12,10 +12,10 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import {
   LinkwardenAPI,
   createDevClient,
-  getTargetCollectionName,
   findCollectionByName,
 } from "../src/api";
 import type { LinkwardenLink } from "../src/types/api";
+import { getTestCollectionId, getTestCollectionName } from "./utils/config";
 
 // Test configuration
 const TEST_TIMEOUT = 30000;
@@ -45,18 +45,28 @@ describe("E2E: Linkwarden API", () => {
 
   beforeEach(async () => {
     api = createDevClient();
-    targetCollectionName = getTargetCollectionName();
+    // Use TEST_COLLECTION from env (default: 114 "Unorganized")
+    targetCollectionId = getTestCollectionId();
+    targetCollectionName = getTestCollectionName();
 
     const collection = await findCollectionByName(api, targetCollectionName);
 
     if (!collection) {
       throw new Error(
-        `Collection "${targetCollectionName}" not found. ` +
-          `Please create it in Linkwarden or update COLLECTION in .env`
+        `Collection "${targetCollectionName}" (ID: ${targetCollectionId}) not found. ` +
+          `Please create it in Linkwarden or update TEST_COLLECTION in .env`
       );
     }
 
-    targetCollectionId = collection.id;
+    // Verify the collection ID matches
+    if (collection.id !== targetCollectionId) {
+      console.warn(
+        `[E2E] Warning: Collection "${targetCollectionName}" has ID ${collection.id}, ` +
+          `but TEST_COLLECTION is set to ${targetCollectionId}. Using found ID ${collection.id}.`
+      );
+      targetCollectionId = collection.id;
+    }
+
     console.log(
       `[E2E] Using collection: ${targetCollectionName} (ID: ${targetCollectionId})`
     );

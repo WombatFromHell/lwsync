@@ -126,14 +126,63 @@ export interface Logger {
   error(message: string, ...args: unknown[]): void;
 }
 
+// Global log collector (set by background.ts on startup)
+let logCollector: import("./logCollector").SyncLogCollector | null = null;
+
+/**
+ * Set the global log collector (called by background.ts on startup)
+ */
+export function setLogCollector(
+  collector: import("./logCollector").SyncLogCollector
+): void {
+  logCollector = collector;
+}
+
 export function createLogger(prefix?: string): Logger {
   const isTest = isTestEnvironment();
   const label = prefix ? `[${prefix}]` : "[LWSync]";
+
   return {
-    debug: (m, ...a) => !isTest && console.debug(label, m, ...a),
-    info: (m, ...a) => !isTest && console.log(label, m, ...a),
-    warn: (m, ...a) => console.warn(label, m, ...a),
-    error: (m, ...a) => console.error(label, m, ...a),
+    debug: (m, ...a) => {
+      if (!isTest) {
+        logCollector?.add(
+          "debug",
+          prefix || "LWSync",
+          m,
+          a.length > 0 ? a : undefined
+        );
+        console.debug(label, m, ...a);
+      }
+    },
+    info: (m, ...a) => {
+      if (!isTest) {
+        logCollector?.add(
+          "info",
+          prefix || "LWSync",
+          m,
+          a.length > 0 ? a : undefined
+        );
+        console.log(label, m, ...a);
+      }
+    },
+    warn: (m, ...a) => {
+      logCollector?.add(
+        "warn",
+        prefix || "LWSync",
+        m,
+        a.length > 0 ? a : undefined
+      );
+      console.warn(label, m, ...a);
+    },
+    error: (m, ...a) => {
+      logCollector?.add(
+        "error",
+        prefix || "LWSync",
+        m,
+        a.length > 0 ? a : undefined
+      );
+      console.error(label, m, ...a);
+    },
   };
 }
 
@@ -175,6 +224,31 @@ export function chromePromiseSingle<T>(
 
 export type { MessageType, ChromeMessage } from "../types/background";
 export { createMessageRouter, createAsyncHandler } from "./messageRouter";
+
+// ============ Debounce ============
+
+/**
+ * Create a debounced function
+ * @param fn Function to debounce
+ * @param wait Wait time in milliseconds
+ * @returns Debounced function
+ */
+export function debounce<T extends (...args: unknown[]) => unknown>(
+  fn: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  return function (...args: Parameters<T>) {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    timeout = setTimeout(() => {
+      fn(...args);
+      timeout = null;
+    }, wait);
+  };
+}
 
 // ============ API Error Handling ============
 

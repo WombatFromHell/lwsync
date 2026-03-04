@@ -6,6 +6,7 @@
  */
 
 import * as storage from "../storage";
+import * as bookmarks from "../bookmarks";
 import type { LinkwardenAPI } from "../api";
 import type { Mapping, PendingChange, SyncMetadata } from "../types/storage";
 import { SyncErrorReporter, createErrorContext } from "./errorReporter";
@@ -111,14 +112,25 @@ export class BrowserChangeApplier {
       return;
     }
 
+    logger.info("Creating new link:", {
+      url,
+      title,
+      targetCollectionId: metadata.targetCollectionId,
+      browserId: change.browserId,
+    });
+
     // Check if URL already exists in target collection (prevent duplicates)
-    const existingLinks = await this.api.getCollectionLinks(
+    const existingLinks = await this.api.getLinksByCollection(
       metadata.targetCollectionId
     );
     const existingLink = existingLinks.find((l) => l.url === url);
 
     if (existingLink) {
       // Link exists on server - create mapping instead of duplicate
+      logger.info("Link already exists in collection, creating mapping:", {
+        linkId: existingLink.id,
+        collectionId: metadata.targetCollectionId,
+      });
       const mapping: Mapping = {
         id: crypto.randomUUID(),
         linkwardenType: "link",
@@ -141,6 +153,11 @@ export class BrowserChangeApplier {
         title
       );
 
+      logger.info("Link created successfully:", {
+        linkId: link.id,
+        collectionId: metadata.targetCollectionId,
+      });
+
       // CRITICAL: Create mapping immediately with correct IDs
       const mapping: Mapping = {
         id: crypto.randomUUID(),
@@ -157,11 +174,15 @@ export class BrowserChangeApplier {
       // Handle 409 Conflict - link already exists
       if (error instanceof Error && error.message.includes("409")) {
         // Try to find the existing link and create mapping
-        const links = await this.api.getCollectionLinks(
+        const links = await this.api.getLinksByCollection(
           metadata.targetCollectionId
         );
         const existingLink = links.find((l) => l.url === change.data!.url);
         if (existingLink) {
+          logger.info("Link already exists (409), creating mapping:", {
+            linkId: existingLink.id,
+            collectionId: metadata.targetCollectionId,
+          });
           const mapping: Mapping = {
             id: crypto.randomUUID(),
             linkwardenType: "link",
@@ -176,6 +197,10 @@ export class BrowserChangeApplier {
         }
         return; // Don't throw error - this is expected behavior
       }
+      logger.error("Failed to create link:", {
+        error: error instanceof Error ? error.message : String(error),
+        collectionId: metadata.targetCollectionId,
+      });
       throw error; // Re-throw other errors
     }
   }
@@ -224,7 +249,44 @@ export class BrowserChangeApplier {
       return;
     }
 
-    // Find mapping for the new parent folder
+    // Find mapping for the moved item
+    const itemMapping = await storage.getMappingByBrowserId(change.browserId!);
+
+    if (!itemMapping) {
+      logger.warn("No mapping found for moved item:", {
+        browserId: change.browserId,
+      });
+      return;
+    }
+
+    // Capture index in mapping (for both reorders and moves)
+    if (change.index !== undefined) {
+      itemMapping.browserIndex = change.index;
+      itemMapping.browserUpdatedAt = Date.now();
+      await storage.upsertMapping(itemMapping);
+      logger.debug("Captured bookmark index:", {
+        browserId: change.browserId,
+        index: change.index,
+      });
+    }
+
+    // Check if it's a reorder (same parent) or actual move (different parent)
+    const isReorder = change.oldParentId === change.parentId;
+
+    if (isReorder) {
+      // Just a reorder within same folder - index already captured above
+      logger.info("Bookmark reordered within same folder:", {
+        browserId: change.browserId,
+        newIndex: change.index,
+      });
+
+      // Capture indices for ALL siblings to maintain accurate order
+      // When one bookmark moves, others shift positions
+      await this.captureSiblingIndices(change.parentId as string);
+      return;
+    }
+
+    // It's a move to different parent - need to verify parent is a synced collection
     const parentMapping = await storage.getMappingByBrowserId(
       change.parentId as string
     );
@@ -238,23 +300,17 @@ export class BrowserChangeApplier {
       return;
     }
 
-    // Find mapping for the moved item
-    const itemMapping = await storage.getMappingByLinkwardenId(
-      change.linkwardenId,
-      "link"
-    );
-
-    if (itemMapping) {
-      // Link move - update collection on Linkwarden
+    // Handle link/folder move to different parent
+    if (itemMapping.linkwardenType === "link") {
       await this.handleLinkMove(change, parentMapping, itemMapping);
     } else {
-      // Might be a folder move
       await this.handleFolderMove(change, parentMapping);
     }
   }
 
   /**
    * Handle link move between collections
+   * Uses bulk API for efficiency, preserves browserIndex for order restoration
    */
   private async handleLinkMove(
     change: PendingChange,
@@ -269,13 +325,15 @@ export class BrowserChangeApplier {
         toCollectionId: parentMapping.linkwardenId,
       });
 
+      // Use individual update API (supported operation)
       await this.api.updateLink(change.linkwardenId!, {
         collectionId: parentMapping.linkwardenId,
       });
 
-      // Update mapping timestamp
+      // Update mapping timestamp and preserve browserIndex
       itemMapping.browserUpdatedAt = Date.now();
       itemMapping.lastSyncedAt = Date.now();
+      // browserIndex is preserved - order will be restored on next sync
       await storage.upsertMapping(itemMapping);
 
       logger.info("Link move completed:", change.data?.title);
@@ -351,5 +409,143 @@ export class BrowserChangeApplier {
    */
   getErrorReporter(): SyncErrorReporter {
     return this.errors;
+  }
+
+  /**
+   * Batch process multiple link moves to same collection
+   * More efficient than individual moves when multiple links are moved together
+   */
+  async batchProcessLinkMoves(
+    changes: PendingChange[],
+    metadata: SyncMetadata
+  ): Promise<void> {
+    // Group moves by target collection
+    const movesByCollection = new Map<
+      number,
+      Array<{ change: PendingChange; mapping: Mapping }>
+    >();
+
+    for (const change of changes) {
+      if (change.type !== "move" || change.source !== "browser") continue;
+      if (!change.linkwardenId || !change.parentId) continue;
+
+      // Find mapping for the moved item
+      const itemMapping = await storage.getMappingByBrowserId(
+        change.browserId!
+      );
+      if (!itemMapping || itemMapping.linkwardenType !== "link") continue;
+
+      // Find mapping for the target parent
+      const parentMapping = await storage.getMappingByBrowserId(
+        change.parentId as string
+      );
+      if (!parentMapping || parentMapping.linkwardenType !== "collection")
+        continue;
+
+      // Group by target collection
+      const collection =
+        movesByCollection.get(parentMapping.linkwardenId) || [];
+      collection.push({ change, mapping: itemMapping });
+      movesByCollection.set(parentMapping.linkwardenId, collection);
+    }
+
+    // Process each group with individual operations (supported)
+    for (const [collectionId, moves] of movesByCollection.entries()) {
+      const linkIds = moves.map((m) => m.change.linkwardenId!);
+
+      logger.info("Moving links:", {
+        count: linkIds.length,
+        toCollection: collectionId,
+      });
+
+      // Move each link individually (supported operation)
+      for (const { mapping, change } of moves) {
+        try {
+          await this.api.updateLink(mapping.linkwardenId, {
+            collectionId,
+          });
+          mapping.browserUpdatedAt = Date.now();
+          mapping.lastSyncedAt = Date.now();
+          // Don't overwrite browserIndex when moving to different collection
+          // The browserIndex represents order within a folder, not across folders
+          // Only update if this is a reorder within same folder (oldParentId === parentId)
+          if (
+            change.index !== undefined &&
+            change.oldParentId === change.parentId
+          ) {
+            mapping.browserIndex = change.index;
+          }
+          // browserIndex is preserved - order will be restored on next sync
+          await storage.upsertMapping(mapping);
+        } catch (error) {
+          logger.error("Failed to move link:", error as Error);
+        }
+      }
+
+      logger.info("Link moves completed:", {
+        moved: linkIds.length,
+        toCollection: collectionId,
+      });
+    }
+  }
+
+  /**
+   * Batch process multiple link deletes
+   * Uses individual DELETE operations (bulk DELETE not documented in API spec)
+   */
+  async batchProcessLinkDeletes(changes: PendingChange[]): Promise<void> {
+    const linkIds: number[] = [];
+    const changesById = new Map<number, PendingChange>();
+
+    for (const change of changes) {
+      if (change.type !== "delete" || change.source !== "browser") continue;
+      if (!change.linkwardenId) continue;
+
+      linkIds.push(change.linkwardenId);
+      changesById.set(change.linkwardenId, change);
+    }
+
+    if (linkIds.length === 0) return;
+
+    logger.info("Deleting links:", {
+      count: linkIds.length,
+    });
+
+    // Delete each link individually (supported operation)
+    for (const linkId of linkIds) {
+      try {
+        await this.api.deleteLink(linkId);
+        await storage.removeMapping(linkId, "link");
+      } catch (error) {
+        logger.error("Failed to delete link:", error as Error);
+      }
+    }
+
+    logger.info("Link deletes completed:", {
+      deleted: linkIds.length,
+    });
+  }
+
+  /**
+   * Capture indices for all bookmarks in a folder
+   * Called after reorder to update all affected siblings
+   */
+  private async captureSiblingIndices(parentBrowserId: string): Promise<void> {
+    try {
+      const children = await bookmarks.getChildren(parentBrowserId);
+      for (const child of children) {
+        const mapping = await storage.getMappingByBrowserId(child.id);
+        if (mapping) {
+          mapping.browserIndex = child.index;
+          await storage.upsertMapping(mapping);
+        }
+      }
+      logger.debug("Captured sibling indices:", {
+        parentId: parentBrowserId,
+        count: children.length,
+      });
+    } catch (error) {
+      logger.warn("Failed to capture sibling indices:", error as Error);
+    }
   }
 }

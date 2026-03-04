@@ -68,23 +68,45 @@ export class RemoteSync {
       const caches = await this.buildCaches(collection, rootFolderId);
 
       // Sync collection structure and links
+      // IMPORTANT: isRootCollection=true means the root collection's links sync directly
+      // to the browser root folder, without creating a folder named after the collection
       await this.collectionSync.syncCollection(
         collection,
         rootFolderId,
         caches,
-        stats
+        stats,
+        true, // isRootCollection = true
+        metadata.lastSyncTime // Pass lastSyncTime for user reorder detection
       );
 
       // Collect all remote IDs for orphan cleanup
       const remoteCollectionIds = this.collectCollectionIds(collection);
       const remoteLinkIds = this.collectLinkIds(collection);
 
-      // Cleanup orphaned mappings
-      await this.cleanupOrphans(
-        remoteLinkIds,
-        remoteCollectionIds,
-        rootFolderId
-      );
+      logger.info("Collected remote IDs for orphan cleanup:", {
+        collectionCount: remoteCollectionIds.size,
+        linkCount: remoteLinkIds.size,
+      });
+
+      // SAFETY CHECK: Don't cleanup orphans if we got NOTHING from server
+      // This prevents accidental deletion when API fetch fails completely
+      // We DO cleanup if we have collections but no links (valid empty state)
+      const hasAnyRemoteData =
+        remoteLinkIds.size > 0 || remoteCollectionIds.size > 0;
+
+      if (!hasAnyRemoteData) {
+        logger.warn(
+          "Skipping orphan cleanup - server returned 0 collections and 0 links. " +
+            "This indicates an API failure. Check connection and collection ID."
+        );
+      } else {
+        // Cleanup orphaned mappings
+        await this.cleanupOrphans(
+          remoteLinkIds,
+          remoteCollectionIds,
+          rootFolderId
+        );
+      }
 
       logger.info("Remote sync complete:", stats.toString());
     } catch (error) {
@@ -226,6 +248,9 @@ export class RemoteSync {
       remoteCollectionIds,
       browserRootFolderId
     );
+
+    // Normalize indices after deletions
+    await orphanCleanup.normalizeIndices(browserRootFolderId);
   }
 
   /**

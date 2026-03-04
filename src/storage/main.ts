@@ -230,8 +230,9 @@ export async function saveSettings(settings: Settings): Promise<void> {
     serverUrl: settings.serverUrl,
     accessToken: settings.accessToken,
     syncInterval: settings.syncInterval,
-    targetCollectionName:
-      settings.targetCollectionName || getDefaultCollectionName(),
+    // Preserve both ID and name - ID takes precedence
+    targetCollectionId: settings.targetCollectionId,
+    targetCollectionName: settings.targetCollectionName,
     browserFolderName: settings.browserFolderName || "",
   };
   await saveAll(data);

@@ -173,3 +173,48 @@ export function nodeToMapping(
     checksum: computeChecksum(node),
   };
 }
+
+/**
+ * Reorder multiple bookmarks within the same parent folder
+ * Moves all bookmarks to their target indices efficiently
+ * Uses atomic reorder to avoid index shifting issues
+ *
+ * @param items - Array of bookmark IDs and their target indices
+ * @param parentId - The parent folder ID (all items must be in this folder)
+ */
+export async function reorderWithinFolder(
+  items: Array<{ id: string; targetIndex: number }>,
+  parentId: string
+): Promise<void> {
+  // Get current children to find items not in the reorder list
+  const currentChildren = await getChildren(parentId);
+  const currentIds = currentChildren.map((child) => child.id);
+
+  // Build the new order directly from target indices
+  // Create array of [targetIndex, id] pairs
+  const itemsWithIndex = items.map(
+    (item) => [item.targetIndex, item.id] as [number, string]
+  );
+
+  // Sort by target index
+  itemsWithIndex.sort((a, b) => a[0] - b[0]);
+
+  // Rebuild the children array in the correct order
+  const newChildren = itemsWithIndex.map(([_, id]) => id);
+
+  // Add any children that weren't in the reorder list (they stay at the end)
+  const reorderedIds = new Set(items.map((i) => i.id));
+  for (const childId of currentIds) {
+    if (!reorderedIds.has(childId)) {
+      newChildren.push(childId);
+    }
+  }
+
+  // Move each item to its target position
+  // The browser handles the reordering internally
+  // Process in order to ensure correct final state
+  for (let i = 0; i < itemsWithIndex.length; i++) {
+    const [targetIndex, id] = itemsWithIndex[i];
+    await move(id, { parentId, index: targetIndex });
+  }
+}

@@ -15,6 +15,7 @@ export { RemoteSync } from "./remote-sync";
 export { CollectionSync } from "./collections";
 export { SyncInitializer } from "./initialization";
 export { OrphanCleanup } from "./orphans";
+export { SyncComparator } from "./comparator";
 
 // Utilities
 export { SyncErrorReporter, createErrorContext } from "./errorReporter";

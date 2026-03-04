@@ -3,14 +3,16 @@
  */
 
 import type { LinkwardenLink } from "../../src/api";
+import { getTestCollectionId } from "../utils/config";
 
 let linkCounter = 0;
 
 /**
  * Create a LinkwardenLink with sensible defaults
+ * Uses TEST_COLLECTION from env var for collectionId by default
  */
 export function createLink(
-  collectionId: number,
+  collectionId: number = getTestCollectionId(),
   overrides: Partial<LinkwardenLink> = {}
 ): LinkwardenLink {
   linkCounter++;

@@ -97,9 +97,9 @@ function App() {
             defaultExpanded={status.configured}
           />
           <CommonSettingsSection
-            targetCollectionName={settings.targetCollectionName}
+            targetCollectionName={settings.targetCollectionName || ""}
             onUpdateTargetCollection={actions.handleUpdateTargetCollection}
-            browserFolderName={settings.browserFolderName}
+            browserFolderName={settings.browserFolderName || ""}
             onUpdateBrowserFolder={actions.handleUpdateBrowserFolder}
             syncInterval={settings.syncInterval}
             onUpdateInterval={actions.handleUpdateInterval}

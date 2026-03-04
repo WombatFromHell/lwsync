@@ -106,6 +106,15 @@ export class MockBookmarks {
       `bookmark-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const now = Date.now();
 
+    // Auto-increment index if not provided
+    let index = node.index;
+    if (index === undefined && node.parentId) {
+      const parent = this.tree.get(node.parentId);
+      if (parent && parent.children) {
+        index = parent.children.length; // Next available index
+      }
+    }
+
     const newNode: MockBookmarkNode = {
       id,
       parentId: node.parentId || "0",
@@ -114,7 +123,7 @@ export class MockBookmarks {
       children: node.url ? undefined : [],
       dateAdded: node.dateAdded || now,
       dateGroupModified: node.dateGroupModified || now,
-      index: node.index || 0,
+      index: index ?? 0,
     };
 
     this.tree.set(id, newNode);
@@ -328,21 +337,29 @@ export class MockBookmarks {
       }
     }
 
-    // Add to new parent
-    const newParentId = destination.parentId;
+    // Add to new parent at specified index
+    // If parentId not specified, keep same parent (reorder within same folder)
+    const newParentId = destination.parentId ?? oldParentId;
     if (newParentId) {
       const newParent = this.tree.get(newParentId);
       if (newParent && newParent.children) {
-        newParent.children.push(id);
+        const insertIndex = destination.index ?? newParent.children.length;
+        // Insert at specified index
+        newParent.children.splice(insertIndex, 0, id);
         newParent.dateGroupModified = now;
         this.tree.set(newParent.id, newParent);
       }
     }
 
     node.parentId = newParentId;
-    node.index = destination.index || 0;
+    node.index = destination.index ?? 0;
     node.dateGroupModified = now;
     this.tree.set(id, node);
+
+    // Renumber all siblings in new parent to ensure consistent indices
+    if (newParentId) {
+      this.renumberChildren(newParentId);
+    }
 
     // Fire event
     const chromeNode = this.toChromeNode(node);
@@ -362,6 +379,22 @@ export class MockBookmarks {
     }
 
     return promise;
+  }
+
+  /**
+   * Renumber children of a parent to ensure sequential indices
+   */
+  private renumberChildren(parentId: string): void {
+    const parent = this.tree.get(parentId);
+    if (!parent || !parent.children) return;
+
+    for (let i = 0; i < parent.children.length; i++) {
+      const child = this.tree.get(parent.children[i]);
+      if (child) {
+        child.index = i;
+        this.tree.set(child.id, child);
+      }
+    }
   }
 
   /**
@@ -487,6 +520,69 @@ export class MockBookmarks {
     }
 
     return result;
+  }
+
+  /**
+   * Reorder multiple bookmarks within the same parent folder
+   * Moves all bookmarks to their target indices efficiently
+   * Processes moves sequentially to avoid index conflicts
+   */
+  async reorderWithinFolder(
+    items: Array<{ id: string; targetIndex: number }>,
+    parentId: string
+  ): Promise<void> {
+    // Get current children order
+    const parent = this.tree.get(parentId);
+    if (!parent || !parent.children) return;
+
+    // Build the new order directly from target indices
+    // Create array of [targetIndex, id] pairs
+    const itemsWithIndex = items.map(
+      (item) => [item.targetIndex, item.id] as [number, string]
+    );
+
+    // Sort by target index
+    itemsWithIndex.sort((a, b) => a[0] - b[0]);
+
+    // Rebuild the children array in the correct order
+    const newChildren = itemsWithIndex.map(([_, id]) => id);
+
+    // Add any children that weren't in the reorder list (they stay at the end)
+    const reorderedIds = new Set(items.map((i) => i.id));
+    for (const childId of parent.children) {
+      if (!reorderedIds.has(childId)) {
+        newChildren.push(childId);
+      }
+    }
+
+    // Update parent's children
+    parent.children = newChildren;
+    parent.dateGroupModified = Date.now();
+    this.tree.set(parentId, parent);
+
+    // Update each node's index
+    for (let i = 0; i < parent.children.length; i++) {
+      const child = this.tree.get(parent.children[i]);
+      if (child) {
+        child.index = i;
+        this.tree.set(child.id, child);
+      }
+    }
+
+    // Fire events for all moved items
+    for (const item of items) {
+      const node = this.tree.get(item.id);
+      if (node) {
+        this.eventListeners.onMoved.forEach((cb) =>
+          cb(item.id, {
+            parentId: parentId || "0",
+            oldParentId: parentId || "0",
+            index: item.targetIndex,
+            oldIndex: node.index || 0,
+          })
+        );
+      }
+    }
   }
 
   /**

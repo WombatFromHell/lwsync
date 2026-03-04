@@ -7,8 +7,16 @@ import { LinkwardenAPI } from "./api";
 import { SyncEngine } from "./sync";
 import * as storage from "./storage";
 import * as bookmarks from "./bookmarks";
-import { createLogger, generateId, now } from "./utils";
+import {
+  createLogger,
+  generateId,
+  now,
+  debounce,
+  setLogCollector,
+} from "./utils";
+import { SyncLogCollector } from "./utils/logCollector";
 import { getDefaultCollectionName } from "./browser";
+import { CONFIG } from "./config";
 import { createMessageRouter } from "./utils/messageRouter";
 import type {
   ChromeMessage,
@@ -20,9 +28,23 @@ import type {
   UpdateBrowserFolderMessage,
 } from "./types/background";
 
+// Initialize global log collector
+const logCollector = new SyncLogCollector();
+setLogCollector(logCollector);
+
 const logger = createLogger("LWSync");
 
 let syncEngine: SyncEngine | null = null;
+
+/**
+ * Debounced sync trigger
+ * Triggers sync 2 seconds after the last bookmark change
+ * This provides near-immediate feedback without flooding the server
+ */
+const debouncedSync = debounce(() => {
+  logger.info("Auto-sync triggered by bookmark change");
+  void performSync();
+}, 2000); // 2 second debounce
 
 /**
  * Add entry to sync log (persistent storage)
@@ -61,13 +83,19 @@ async function initSyncEngine(): Promise<void> {
     periodInMinutes: settings.syncInterval,
   });
 
-  const collectionName =
-    settings.targetCollectionName || getDefaultCollectionName();
+  // Resolve collection identifier (ID preferred, then name, then default)
+  const collectionIdentifier = resolveCollectionIdentifier(settings);
   const browserFolderName = settings.browserFolderName || "";
+
+  logger.info("Initializing sync:", {
+    collection: collectionIdentifier,
+    browserFolder: browserFolderName,
+    interval: settings.syncInterval,
+  });
 
   await addLogEntry(
     "info",
-    `Initialized - Collection: "${collectionName}", Browser Folder: "${browserFolderName}", Interval: ${settings.syncInterval} min`
+    `Initialized - Collection: "${collectionIdentifier}", Browser Folder: "${browserFolderName}", Interval: ${settings.syncInterval} min`
   );
 
   // Auto-initialize sync if not already configured
@@ -75,10 +103,10 @@ async function initSyncEngine(): Promise<void> {
   if (!metadata) {
     await addLogEntry(
       "info",
-      `Initializing sync for collection: ${collectionName}, browser folder: ${browserFolderName}...`
+      `Initializing sync for collection: ${collectionIdentifier}, browser folder: ${browserFolderName}...`
     );
     const result = await syncEngine.initialize(
-      collectionName,
+      collectionIdentifier,
       browserFolderName
     );
     if (result.success) {
@@ -89,7 +117,29 @@ async function initSyncEngine(): Promise<void> {
     } else {
       await addLogEntry("error", `Failed to initialize sync: ${result.error}`);
     }
+  } else {
+    await addLogEntry(
+      "info",
+      `Using existing metadata - Collection ID: ${metadata.targetCollectionId}`
+    );
   }
+}
+
+/**
+ * Resolve collection identifier from settings
+ * Priority: 1) ID, 2) Name, 3) Default "Bookmarks"
+ */
+function resolveCollectionIdentifier(settings: {
+  targetCollectionId?: number | null;
+  targetCollectionName?: string | null;
+}): string {
+  if (settings.targetCollectionId) {
+    return settings.targetCollectionId.toString();
+  }
+  if (settings.targetCollectionName && settings.targetCollectionName.trim()) {
+    return settings.targetCollectionName;
+  }
+  return getDefaultCollectionName();
 }
 
 /**
@@ -141,13 +191,24 @@ async function performSync(): Promise<void> {
 function setupBookmarkListeners(): void {
   // Bookmark created
   chrome.bookmarks.onCreated.addListener(async (id, node) => {
-    if (!syncEngine) return;
+    if (!syncEngine) {
+      logger.warn("Sync engine not initialized, ignoring bookmark created");
+      return;
+    }
 
     // Ignore if it's our sync folder
     const metadata = await storage.getSyncMetadata();
-    if (metadata && id === metadata.browserRootFolderId) return;
+    if (metadata && id === metadata.browserRootFolderId) {
+      logger.info("Ignoring sync folder creation:", id);
+      return;
+    }
 
-    logger.info("Bookmark created:", id);
+    logger.info("Bookmark created:", {
+      id,
+      title: node.title,
+      url: node.url,
+      parentId: node.parentId,
+    });
 
     // Queue as pending change
     await storage.addPendingChange({
@@ -163,11 +224,23 @@ function setupBookmarkListeners(): void {
       timestamp: now(),
       resolved: false,
     });
+
+    // Trigger debounced sync (will sync 2s after last change)
+    debouncedSync();
   });
 
   // Bookmark changed (title or URL)
   chrome.bookmarks.onChanged.addListener(async (id, changes) => {
-    if (!syncEngine) return;
+    if (!syncEngine) {
+      logger.warn("Sync engine not initialized, ignoring bookmark changed");
+      return;
+    }
+
+    logger.info("Bookmark changed:", {
+      id,
+      title: changes.title,
+      url: changes.url,
+    });
 
     // Find mapping to get Linkwarden ID
     const mapping = await storage.getMappingByBrowserId(id);
@@ -186,13 +259,22 @@ function setupBookmarkListeners(): void {
       timestamp: now(),
       resolved: false,
     });
+
+    // Trigger debounced sync
+    debouncedSync();
   });
 
   // Bookmark removed
-  chrome.bookmarks.onRemoved.addListener(async (id) => {
-    if (!syncEngine) return;
+  chrome.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
+    if (!syncEngine) {
+      logger.warn("Sync engine not initialized, ignoring bookmark removed");
+      return;
+    }
 
-    logger.info("Bookmark removed:", id);
+    logger.info("Bookmark removed:", {
+      id,
+      parentId: removeInfo.parentId,
+    });
 
     // Find mapping to get Linkwarden ID
     const mapping = await storage.getMappingByBrowserId(id);
@@ -206,25 +288,41 @@ function setupBookmarkListeners(): void {
         timestamp: now(),
         resolved: false,
       });
+
+      // Trigger debounced sync
+      debouncedSync();
+    } else {
+      logger.info("No mapping found for removed bookmark, skipping:", id);
     }
   });
 
-  // Bookmark moved
+  // Bookmark moved (includes reorder within same folder)
   chrome.bookmarks.onMoved.addListener(async (id, moveInfo) => {
-    if (!syncEngine) return;
+    if (!syncEngine) {
+      logger.warn("Sync engine not initialized, ignoring bookmark moved");
+      return;
+    }
 
     // Find mapping to get Linkwarden ID and type
     const mapping = await storage.getMappingByBrowserId(id);
-    if (!mapping) return; // Not a synced item
+    if (!mapping) {
+      logger.info("No mapping found for moved bookmark, skipping:", id);
+      return; // Not a synced item
+    }
 
     // Get the node to determine if it's a folder or link
     const node = await bookmarks.get(id);
     const isFolder = !node?.url;
 
+    const isReorder = moveInfo.oldParentId === moveInfo.parentId;
+
     logger.info("Bookmark moved:", {
       id,
       isFolder,
+      isReorder,
       title: node?.title,
+      fromIndex: moveInfo.oldIndex,
+      toIndex: moveInfo.index,
       oldParentId: moveInfo.oldParentId,
       newParentId: moveInfo.parentId,
     });
@@ -237,6 +335,9 @@ function setupBookmarkListeners(): void {
       linkwardenId: mapping.linkwardenId,
       browserId: id,
       parentId: moveInfo.parentId,
+      index: moveInfo.index, // Capture new index
+      oldParentId: moveInfo.oldParentId, // Capture old parent for reorder detection
+      oldIndex: moveInfo.oldIndex, // Capture old index
       data: {
         title: node?.title,
         url: node?.url,
@@ -244,6 +345,15 @@ function setupBookmarkListeners(): void {
       timestamp: now(),
       resolved: false,
     });
+
+    // Update mapping's browserUpdatedAt to track user reorder
+    // This allows restoreOrder to detect that browser was modified after last sync
+    // Note: Don't update browserIndex here - it's updated by restoreOrder() when capturing sibling order
+    mapping.browserUpdatedAt = Date.now();
+    await storage.upsertMapping(mapping);
+
+    // Trigger debounced sync
+    debouncedSync();
   });
 }
 
@@ -300,7 +410,25 @@ function setupMessageListener(): void {
       });
   });
 
-  router.register("GET_SETTINGS", () => storage.getSettings());
+  router.register("GET_SETTINGS", () =>
+    storage.getSettings().then((settings) => {
+      if (!settings) {
+        return {
+          serverUrl: "",
+          accessToken: "",
+          syncInterval: CONFIG.sync.DEFAULT_SYNC_INTERVAL,
+          targetCollectionId: undefined,
+          targetCollectionName: getDefaultCollectionName(),
+          browserFolderName: "",
+        };
+      }
+      return {
+        ...settings,
+        targetCollectionName:
+          settings.targetCollectionName || getDefaultCollectionName(),
+      };
+    })
+  );
 
   router.register("TEST_CONNECTION", (payload: TestConnectionMessage) =>
     new LinkwardenAPI(payload.serverUrl, payload.token)
@@ -342,6 +470,72 @@ function setupMessageListener(): void {
 
   router.register("CLEAR_LOG", () =>
     clearLog().then(() => ({ success: true }))
+  );
+
+  router.register("EXPORT_LOGS", () => ({
+    success: true,
+    logs: logCollector.getEntries(),
+    json: logCollector.toJSON(),
+  }));
+
+  router.register("COMPARE_SYNC", () =>
+    syncEngine
+      ?.compare({ includeDebug: true })
+      .then((comparison) => {
+        return { success: true, comparison };
+      })
+      .catch((error: Error) => {
+        void addLogEntry("error", `Comparison failed: ${error.message}`);
+        return { success: false, error: error.message };
+      })
+  );
+
+  router.register("GET_DIAGNOSTICS", () =>
+    Promise.all([storage.getSettings(), storage.getSyncMetadata()]).then(
+      ([settings, metadata]) => {
+        const hasId =
+          settings?.targetCollectionId !== undefined &&
+          settings?.targetCollectionId !== null;
+        const hasName =
+          settings?.targetCollectionName &&
+          settings.targetCollectionName.trim() !== "";
+
+        const diagnostics = {
+          settings: {
+            serverUrl: settings?.serverUrl || "(not set)",
+            targetCollectionId: hasId
+              ? settings?.targetCollectionId
+              : "(not set)",
+            targetCollectionName: hasName
+              ? settings?.targetCollectionName
+              : "(not set)",
+            browserFolderName: settings?.browserFolderName || "(not set)",
+            syncInterval: settings?.syncInterval || 5,
+          },
+          metadata: metadata
+            ? {
+                targetCollectionId: metadata.targetCollectionId,
+                browserRootFolderId: metadata.browserRootFolderId,
+                lastSyncTime: metadata.lastSyncTime
+                  ? new Date(metadata.lastSyncTime).toISOString()
+                  : "never",
+              }
+            : "(not initialized)",
+          configMethod: hasId
+            ? "✅ ID (preferred - unique)"
+            : hasName
+              ? "⚠️ Name (can have duplicates)"
+              : "❌ Not set (will use default 'Bookmarks')",
+          recommendation:
+            !hasId && hasName
+              ? "💡 Tip: Use collection ID instead of name for more reliable sync. Find the ID in your Linkwarden URL or API response."
+              : !hasId && !hasName
+                ? "⚠️ Warning: No collection configured. Please set targetCollectionId or targetCollectionName."
+                : "✅ Configuration looks good!",
+        };
+        return diagnostics;
+      }
+    )
   );
 
   router.register(
