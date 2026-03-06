@@ -25,6 +25,7 @@ import {
   findOrCreateNestedFolder,
 } from "./mappings";
 import { createLogger } from "../utils";
+import { generateOrderHash, getTokenInfo } from "./item-order-token";
 
 const logger = createLogger("LWSync collections");
 
@@ -376,7 +377,13 @@ export class CollectionSync {
    * Syncs a single link, but does NOT restore order - that's done separately
    */
   private async syncLinkInline(
-    link: { id: number; name: string; url: string; updatedAt: string },
+    link: {
+      id: number;
+      name: string;
+      url: string;
+      updatedAt: string;
+      description?: string;
+    },
     parentBrowserId: string,
     stats: SyncStats
   ): Promise<void> {
@@ -393,10 +400,33 @@ export class CollectionSync {
           });
           existing.browserUpdatedAt = Date.now();
           existing.lastSyncedAt = Date.now();
-          await storage.upsertMapping(existing);
-          stats.increment("updated");
         }
-        // Note: Order restoration is done separately in restoreOrder()
+        // Update cached name/hash for order token
+        existing.cachedName = link.name;
+        existing.cachedNameHash = generateOrderHash(link.name);
+
+        // CRITICAL: Always capture current browser index (source of truth)
+        const currentNode = await bookmarks.get(existing.browserId);
+        if (currentNode && currentNode.index !== undefined) {
+          existing.browserIndex = currentNode.index;
+        } else if (link.description && existing.browserIndex === undefined) {
+          // FALLBACK: Browser index unavailable - use server token
+          // This handles edge cases like corrupted mappings or import scenarios
+          const tokenInfo = getTokenInfo(link.description, link.name);
+          if (tokenInfo?.hasToken && tokenInfo.index !== undefined) {
+            existing.browserIndex = tokenInfo.index;
+            logger.debug(
+              "Using server order token as fallback (browser index unavailable):",
+              {
+                linkId: link.id,
+                index: tokenInfo.index,
+              }
+            );
+          }
+        }
+
+        await storage.upsertMapping(existing);
+        stats.increment("updated");
       } else {
         // Check if bookmark already exists
         const existingBookmarks = await bookmarks.search(link.url);
@@ -406,6 +436,23 @@ export class CollectionSync {
 
         if (matchingBookmark) {
           // Create mapping for existing bookmark
+          // Browser index is source of truth - capture it
+          // BUT: If server has order token, use it as initial order (fresh sync scenario)
+          let browserIndex = matchingBookmark.index;
+
+          if (link.description) {
+            const tokenInfo = getTokenInfo(link.description, link.name);
+            if (tokenInfo?.hasToken && tokenInfo.index !== undefined) {
+              // Server has order token - use it for initial ordering
+              // This ensures consistent order across devices when bookmark exists locally
+              browserIndex = tokenInfo.index;
+              logger.debug("Using server order token for existing bookmark:", {
+                linkId: link.id,
+                index: tokenInfo.index,
+              });
+            }
+          }
+
           const mapping: Mapping = {
             id: crypto.randomUUID(),
             linkwardenType: "link",
@@ -418,7 +465,9 @@ export class CollectionSync {
               Date.now(),
             lastSyncedAt: Date.now(),
             checksum: computeChecksum(link),
-            browserIndex: matchingBookmark.index, // Capture existing index
+            browserIndex,
+            cachedName: link.name,
+            cachedNameHash: generateOrderHash(link.name),
           };
           await storage.upsertMapping(mapping);
         } else {
@@ -429,6 +478,23 @@ export class CollectionSync {
             url: link.url,
           });
 
+          // Browser index is source of truth - capture it
+          // BUT: If server has order token, use it as initial order (fresh sync scenario)
+          let browserIndex = node.index;
+
+          if (link.description) {
+            const tokenInfo = getTokenInfo(link.description, link.name);
+            if (tokenInfo?.hasToken && tokenInfo.index !== undefined) {
+              // Server has order token - use it for initial ordering
+              // This ensures consistent order across devices on first sync
+              browserIndex = tokenInfo.index;
+              logger.debug("Using server order token for initial order:", {
+                linkId: link.id,
+                index: tokenInfo.index,
+              });
+            }
+          }
+
           const mapping: Mapping = {
             id: crypto.randomUUID(),
             linkwardenType: "link",
@@ -438,7 +504,9 @@ export class CollectionSync {
             browserUpdatedAt: node.dateAdded || Date.now(),
             lastSyncedAt: Date.now(),
             checksum: computeChecksum(link),
-            browserIndex: node.index, // Capture initial index
+            browserIndex,
+            cachedName: link.name,
+            cachedNameHash: generateOrderHash(link.name),
           };
           await storage.upsertMapping(mapping);
           stats.increment("created");
@@ -599,6 +667,14 @@ export class CollectionSync {
             type,
             targetOrder: targetOrder,
           });
+
+          // Push order tokens to server for links (not collections)
+          if (type === "link") {
+            await this.pushOrderTokensToServer(
+              orderedMappings,
+              parentBrowserId
+            );
+          }
         } else {
           // No stored order - capture current browser order
           for (let i = 0; i < currentChildren.length; i++) {
@@ -633,6 +709,80 @@ export class CollectionSync {
           data: { type },
         })
       );
+    }
+  }
+
+  /**
+   * Push order tokens to server for reordered links
+   * Updates link descriptions with order token: [LW:O:{"hash":"index"}]
+   */
+  private async pushOrderTokensToServer(
+    mappings: Mapping[],
+    parentBrowserId: string
+  ): Promise<void> {
+    try {
+      // Get current bookmark details for names
+      const children = await bookmarks.getChildren(parentBrowserId);
+      const bookmarkMap = new Map(children.map((child) => [child.id, child]));
+
+      // Build order updates
+      const orderUpdates = mappings
+        .filter((m) => m.linkwardenType === "link" && m.cachedName)
+        .map((mapping) => {
+          const bookmark = bookmarkMap.get(mapping.browserId);
+          if (!bookmark) return null;
+
+          return {
+            linkId: mapping.linkwardenId,
+            name: mapping.cachedName!,
+            index: mapping.browserIndex || 0,
+          };
+        })
+        .filter((u): u is NonNullable<typeof u> => u !== null);
+
+      if (orderUpdates.length === 0) {
+        logger.debug("No order tokens to push");
+        return;
+      }
+
+      logger.info("Pushing order tokens to server:", {
+        count: orderUpdates.length,
+      });
+
+      // Push each order token (could be batched in future)
+      for (const update of orderUpdates) {
+        try {
+          await this.api.updateLinkOrder(
+            update.linkId,
+            update.name,
+            update.index
+          );
+          logger.debug("Order token pushed:", {
+            linkId: update.linkId,
+            index: update.index,
+          });
+        } catch (error) {
+          this.errors.collect(
+            error as Error,
+            createErrorContext("pushOrderToken", {
+              itemId: update.linkId,
+            })
+          );
+          // Don't fail entire sync for order token failure
+        }
+      }
+
+      logger.info("Order tokens pushed to server:", {
+        pushed: orderUpdates.length,
+      });
+    } catch (error) {
+      this.errors.collect(
+        error as Error,
+        createErrorContext("pushOrderTokensToServer", {
+          itemId: parentBrowserId,
+        })
+      );
+      // Don't fail entire sync for order token failure
     }
   }
 

@@ -40,11 +40,13 @@ export class OrphanCleanup {
           ? await this.findOrphanedMappings(remoteLinkIds, "link")
           : [];
 
-      // Find orphaned collection mappings
-      const orphanedCollections = await this.findOrphanedMappings(
-        remoteCollectionIds,
-        "collection"
-      );
+      // CRITICAL: Skip collection orphan cleanup if remoteCollectionIds is empty
+      // An empty Set indicates we're only cleaning up link orphans, not collection orphans
+      // Cleaning up with empty IDs would delete ALL collection mappings
+      const orphanedCollections =
+        remoteCollectionIds.size > 0
+          ? await this.findOrphanedMappings(remoteCollectionIds, "collection")
+          : [];
 
       // Delete orphaned browser bookmarks
       await this.deleteOrphanedBrowserBookmarks(

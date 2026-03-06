@@ -19,6 +19,7 @@ import {
 } from "./api/errors";
 import type { LinkwardenCollection, LinkwardenLink } from "./types/api";
 export type { LinkwardenCollection, LinkwardenLink } from "./types/api";
+import { appendOrderToken, removeOrderToken } from "./sync/item-order-token";
 
 const logger = createLogger("LWSync API");
 
@@ -295,7 +296,12 @@ export class LinkwardenAPI {
    */
   async updateLink(
     id: number,
-    updates: { name?: string; url?: string; collectionId?: number }
+    updates: {
+      name?: string;
+      url?: string;
+      collectionId?: number;
+      description?: string;
+    }
   ): Promise<LinkwardenLink> {
     // First fetch the existing link to get its collection and tags
     const existing = await this.getLink(id);
@@ -306,12 +312,32 @@ export class LinkwardenAPI {
         id,
         name: updates.name ?? existing.name,
         url: updates.url ?? existing.url,
+        description: updates.description ?? existing.description,
         collection: updates.collectionId
           ? { id: updates.collectionId }
           : (existing.collection ?? { id: existing.collectionId }),
         tags: existing.tags ?? [],
       }),
     });
+  }
+
+  /**
+   * Update link order (stores order token in description field)
+   * Order token format: [LW:O:{"hash":"index"}]
+   */
+  async updateLinkOrder(
+    id: number,
+    name: string,
+    index: number,
+    currentDescription?: string
+  ): Promise<LinkwardenLink> {
+    const cleanDescription = currentDescription
+      ? removeOrderToken(currentDescription)
+      : "";
+
+    const newDescription = appendOrderToken(cleanDescription, name, index);
+
+    return this.updateLink(id, { description: newDescription });
   }
 
   /**

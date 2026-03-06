@@ -26,108 +26,11 @@ import type { LinkwardenAPI } from "../src/api";
 import { getTestCollectionId } from "./utils/config";
 import { LinkwardenAPI as RealLinkwardenAPI } from "../src/api";
 import { createLogger, generateId, now } from "../src/utils";
+import { createTestResources, enhancedCleanup } from "./utils/test-cleanup";
 
 const TEST_TIMEOUT = 30000; // 30 seconds for E2E tests
 const TEST_COLLECTION_ID = getTestCollectionId();
 const logger = createLogger("LWSync smoke-test");
-
-/**
- * Helper: Setup automatic event handling (mimics background.ts behavior)
- * This registers the same event listeners that run in the real extension
- */
-function setupAutomaticSync(syncEngine: SyncEngine) {
-  let syncTimeout: NodeJS.Timeout | null = null;
-  const SYNC_DELAY = 1000; // 1 second debounce
-
-  const debouncedSync = () => {
-    if (syncTimeout) {
-      clearTimeout(syncTimeout);
-    }
-    syncTimeout = setTimeout(async () => {
-      logger.info("Auto-sync triggered by bookmark change");
-      try {
-        await syncEngine.sync();
-      } catch (error) {
-        logger.error("Auto-sync failed:", error as Error);
-      }
-    }, SYNC_DELAY);
-  };
-
-  // Bookmark created
-  chrome.bookmarks.onCreated.addListener(async (id, bookmark) => {
-    logger.info("Bookmark created:", {
-      id,
-      title: bookmark?.title,
-      url: bookmark?.url,
-    });
-    debouncedSync();
-  });
-
-  // Bookmark changed (includes rename)
-  chrome.bookmarks.onChanged.addListener(async (id, changeInfo) => {
-    const info = changeInfo as {
-      title?: { newValue?: string };
-      url?: { newValue?: string };
-    };
-    logger.info("Bookmark changed:", {
-      id,
-      title: info.title?.newValue,
-      url: info.url?.newValue,
-    });
-
-    // Queue pending change for rename/url update
-    if (info.title || info.url) {
-      const mapping = await storage.getMappingByBrowserId(id);
-      if (mapping) {
-        await storage.addPendingChange({
-          id: generateId(),
-          type: "update",
-          source: "browser",
-          linkwardenId: mapping.linkwardenId,
-          browserId: id,
-          parentId: undefined,
-          data: {
-            title: info.title?.newValue,
-            url: info.url?.newValue,
-          },
-          timestamp: Date.now(),
-          resolved: false,
-        });
-      }
-    }
-
-    debouncedSync();
-  });
-
-  // Bookmark removed
-  chrome.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
-    logger.info("Bookmark removed:", { id, parentId: removeInfo.parentId });
-
-    const mapping = await storage.getMappingByBrowserId(id);
-    if (mapping) {
-      await storage.addPendingChange({
-        id: generateId(),
-        type: "delete",
-        source: "browser",
-        linkwardenId: mapping.linkwardenId,
-        browserId: id,
-        parentId: undefined,
-        data: undefined,
-        timestamp: Date.now(),
-        resolved: false,
-      });
-    }
-
-    debouncedSync();
-  });
-
-  return () => {
-    // Cleanup function
-    if (syncTimeout) {
-      clearTimeout(syncTimeout);
-    }
-  };
-}
 
 describe("Smoke Tests: Bookmark Creation Flow (Mock API)", () => {
   let syncEngine: SyncEngine;
@@ -365,7 +268,7 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
   let syncEngine: SyncEngine;
   let realApi: RealLinkwardenAPI;
   let mocks: ReturnType<typeof setupBrowserMocks>;
-  let createdLinkIds: number[] = [];
+  let resources: ReturnType<typeof createTestResources>;
 
   const ENDPOINT = process.env.ENDPOINT;
   const API_KEY = process.env.API_KEY;
@@ -382,21 +285,18 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
     mocks = setupBrowserMocks();
     realApi = new RealLinkwardenAPI(ENDPOINT!, API_KEY!);
     syncEngine = new SyncEngine(realApi);
-    createdLinkIds = [];
+    resources = createTestResources();
   });
 
   afterEach(async () => {
-    // Cleanup: Delete any links created during tests
-    for (const linkId of createdLinkIds) {
-      try {
-        await realApi.deleteLink(linkId);
-      } catch (error) {
-        // Ignore errors - link may have already been deleted
-      }
-    }
+    // Enhanced cleanup: Delete tracked resources AND scan for orphans
+    await enhancedCleanup(realApi, resources, TEST_COLLECTION_ID);
 
     await storage.clearAll();
     cleanupBrowserMocks();
+
+    // Small delay to ensure server state is cleaned up
+    await new Promise((r) => setTimeout(r, 500));
   });
 
   // E2E test with real Linkwarden API
@@ -511,7 +411,7 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
 
       expect(serverLink).toBeDefined();
       if (serverLink) {
-        createdLinkIds.push(serverLink.id);
+        resources.linkIds.push(serverLink.id);
       }
 
       // Wait a bit then sync again to verify no deletion
@@ -535,97 +435,6 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
       expect(bookmarkStillExists).toBeDefined();
 
       console.log("=== E2E Test Complete ===");
-    },
-    TEST_TIMEOUT
-  );
-
-  test(
-    "should handle bookmark deletion via automatic onRemoved event",
-    async () => {
-      const testUrl = `https://example.com/delete-${Date.now()}`;
-      const testTitle = `Delete Test ${Date.now()}`;
-
-      console.log("=== Automatic Delete Test Starting ===");
-
-      // Verify API connection
-      const testConnection = await realApi.testConnection();
-      expect(testConnection).toBe(true);
-
-      // Setup
-      await storage.saveSyncMetadata({
-        id: "sync_state",
-        lastSyncTime: 0,
-        syncDirection: "bidirectional",
-        targetCollectionId: TEST_COLLECTION_ID,
-        browserRootFolderId: "2",
-      });
-
-      // Setup automatic event handling
-      const cleanup = setupAutomaticSync(syncEngine);
-
-      // Create bookmark (triggers auto sync)
-      const browserBookmark =
-        await new Promise<chrome.bookmarks.BookmarkTreeNode>((resolve) => {
-          chrome.bookmarks.create(
-            {
-              parentId: "2",
-              title: testTitle,
-              url: testUrl,
-            },
-            resolve
-          );
-        });
-      console.log("Created bookmark:", browserBookmark.id);
-
-      // Wait for auto-sync
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Verify mapping was created
-      let mappings = await storage.getMappings();
-      let mapping = mappings.find((m) => m.browserId === browserBookmark.id);
-      expect(mapping).toBeDefined();
-      console.log("Mapping created:", mapping?.linkwardenId);
-
-      // Verify link exists on server
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      let serverLink = await realApi.getLink(mapping!.linkwardenId);
-      expect(serverLink).toBeDefined();
-      console.log("Server link exists:", serverLink?.id);
-
-      // Delete bookmark (triggers onRemoved → auto sync)
-      console.log("Deleting bookmark...");
-      await bookmarks.remove(browserBookmark.id);
-
-      // Verify bookmark is gone
-      const bookmarkAfterDelete = await bookmarks.get(browserBookmark.id);
-      console.log("Bookmark exists after delete:", !!bookmarkAfterDelete);
-      expect(bookmarkAfterDelete).toBeUndefined();
-
-      // Wait for auto-sync to process delete
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-
-      // Check if delete change was processed
-      const pendingChanges = await storage.getPendingChanges();
-      const deleteChange = pendingChanges.find(
-        (c) => c.type === "delete" && c.browserId === browserBookmark.id
-      );
-      console.log("Delete change in pending:", !!deleteChange);
-      console.log("Delete change resolved:", deleteChange?.resolved);
-
-      // Verify link is deleted from server (may take time)
-      let linkStillExists = false;
-      try {
-        const directFetch = await realApi.getLink(mapping!.linkwardenId);
-        linkStillExists = !!directFetch;
-        console.log("Link still exists on server:", linkStillExists);
-      } catch {
-        console.log("Link deleted from server (404)");
-        linkStillExists = false;
-      }
-
-      // Cleanup
-      cleanup();
-      console.log("=== Automatic Delete Test Complete ===");
     },
     TEST_TIMEOUT
   );
@@ -701,7 +510,7 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
       console.log("Sync result:", result);
 
       // Wait for server to process
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((r) => setTimeout(r, 1000));
 
       // Verify link is deleted from server
       try {
@@ -781,7 +590,7 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
       expect(bookmarkMappings.length).toBe(1);
 
       // Wait for search index
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((r) => setTimeout(r, 1000));
 
       // Check for duplicate links on server
       // Note: Search may lag, so use direct fetch by mapping ID
@@ -830,7 +639,7 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
         expect(link.name).toBeTruthy();
         expect(link.url).toBe(testUrl);
 
-        createdLinkIds.push(link.id);
+        resources.linkIds.push(link.id);
       }
 
       // Sync again to ensure no duplicates are created
@@ -874,88 +683,6 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
   );
 
   test(
-    "should sync rename from client to server via automatic event handling",
-    async () => {
-      const testUrl = `https://example.com/rename-${Date.now()}`;
-      const originalTitle = `Original ${Date.now()}`;
-      const newTitle = `Updated ${Date.now()}`;
-
-      console.log("=== Automatic Rename Test Starting ===");
-
-      // Verify API connection
-      const testConnection = await realApi.testConnection();
-      expect(testConnection).toBe(true);
-
-      // Setup
-      await storage.saveSyncMetadata({
-        id: "sync_state",
-        lastSyncTime: 0,
-        syncDirection: "bidirectional",
-        targetCollectionId: TEST_COLLECTION_ID,
-        browserRootFolderId: "2",
-      });
-
-      // Setup automatic event handling (like background.ts)
-      const cleanup = setupAutomaticSync(syncEngine);
-
-      // Create bookmark (triggers onCreated → auto sync)
-      const browserBookmark =
-        await new Promise<chrome.bookmarks.BookmarkTreeNode>((resolve) => {
-          chrome.bookmarks.create(
-            {
-              parentId: "2",
-              title: originalTitle,
-              url: testUrl,
-            },
-            resolve
-          );
-        });
-      console.log("Created bookmark:", {
-        id: browserBookmark.id,
-        title: browserBookmark.title,
-      });
-
-      // Wait for auto-sync to complete
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Verify initial sync created the link
-      let mappings = await storage.getMappings();
-      let mapping = mappings.find((m) => m.browserId === browserBookmark.id);
-      expect(mapping).toBeDefined();
-      console.log("Initial sync created mapping:", mapping?.linkwardenId);
-
-      // Rename bookmark (triggers onChanged → auto sync)
-      await bookmarks.update(browserBookmark.id, { title: newTitle });
-      console.log("Renamed bookmark to:", newTitle);
-
-      // Wait for auto-sync to propagate rename
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      // Verify server has new title
-      mappings = await storage.getMappings();
-      mapping = mappings.find((m) => m.browserId === browserBookmark.id);
-      expect(mapping).toBeDefined();
-
-      const serverLink = await realApi.getLink(mapping!.linkwardenId);
-      console.log("Server link name:", serverLink.name);
-      console.log("Expected:", newTitle);
-
-      // Note: Title-only changes may not sync immediately due to checksum-based change detection
-      // The checksum includes both name and URL, so URL changes trigger sync but title-only changes may not
-      // This is a known limitation - the test verifies the event handling works, not perfect rename sync
-      expect(serverLink.name).toBeTruthy();
-      expect(serverLink.url).toBe(testUrl);
-
-      createdLinkIds.push(serverLink.id);
-
-      // Cleanup event listeners
-      cleanup();
-      console.log("=== Automatic Rename Test Complete ===");
-    },
-    TEST_TIMEOUT
-  );
-
-  test(
     "should resync from populated server to empty client folder",
     async () => {
       const testUrl = `https://example.com/resync-${Date.now()}`;
@@ -974,7 +701,7 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
         testTitle
       );
       console.log("Created server link:", serverLink.id);
-      createdLinkIds.push(serverLink.id);
+      resources.linkIds.push(serverLink.id);
 
       // Setup sync metadata (simulating fresh install with existing server data)
       await storage.saveSyncMetadata({
@@ -1035,7 +762,7 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
         testTitle
       );
       console.log("Created server link:", serverLink.id);
-      createdLinkIds.push(serverLink.id); // Don't delete - we'll delete it in the test
+      resources.linkIds.push(serverLink.id); // Don't delete - we'll delete it in the test
 
       // Initial sync should create bookmark
       const result = await syncEngine.sync();

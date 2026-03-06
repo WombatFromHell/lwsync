@@ -24,6 +24,10 @@ export interface Mapping {
   lastSyncedAt: number;
   checksum: string;
   browserIndex?: number; // Track position in parent folder for order restoration
+
+  // Order token support (Phase 11)
+  cachedName?: string; // Cached item name for hash regeneration on rename
+  cachedNameHash?: string; // Hash of cachedName (8 hex chars for order token)
 }
 
 export interface PendingChange {

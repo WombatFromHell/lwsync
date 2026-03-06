@@ -13,6 +13,7 @@ import { SyncErrorReporter, createErrorContext } from "./errorReporter";
 import { computeChecksum } from "./conflict";
 import { appendMoveToken, isDescendantOf } from "./moves";
 import { createLogger } from "../utils";
+import { generateOrderHash, appendOrderToken } from "./item-order-token";
 
 const logger = createLogger("LWSync browser-changes");
 
@@ -279,6 +280,29 @@ export class BrowserChangeApplier {
         browserId: change.browserId,
         newIndex: change.index,
       });
+
+      // Push order token to server if we have cached name
+      if (itemMapping.cachedName && change.index !== undefined) {
+        try {
+          await this.api.updateLinkOrder(
+            change.linkwardenId!,
+            itemMapping.cachedName,
+            change.index
+          );
+          logger.debug("Order token pushed to server:", {
+            linkId: change.linkwardenId,
+            index: change.index,
+          });
+        } catch (error) {
+          this.errors.collect(
+            error as Error,
+            createErrorContext("pushOrderTokenOnReorder", {
+              itemId: change.linkwardenId,
+            })
+          );
+          // Don't fail the reorder for order token failure
+        }
+      }
 
       // Capture indices for ALL siblings to maintain accurate order
       // When one bookmark moves, others shift positions

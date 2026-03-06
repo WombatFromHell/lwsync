@@ -6,14 +6,7 @@
 import { LinkwardenAPI } from "./api";
 import { SyncEngine } from "./sync";
 import * as storage from "./storage";
-import * as bookmarks from "./bookmarks";
-import {
-  createLogger,
-  generateId,
-  now,
-  debounce,
-  setLogCollector,
-} from "./utils";
+import { createLogger, setLogCollector } from "./utils";
 import { SyncLogCollector } from "./utils/logCollector";
 import { getDefaultCollectionName } from "./browser";
 import { CONFIG } from "./config";
@@ -35,16 +28,6 @@ setLogCollector(logCollector);
 const logger = createLogger("LWSync");
 
 let syncEngine: SyncEngine | null = null;
-
-/**
- * Debounced sync trigger
- * Triggers sync 2 seconds after the last bookmark change
- * This provides near-immediate feedback without flooding the server
- */
-const debouncedSync = debounce(() => {
-  logger.info("Auto-sync triggered by bookmark change");
-  void performSync();
-}, 2000); // 2 second debounce
 
 /**
  * Add entry to sync log (persistent storage)
@@ -183,212 +166,6 @@ async function performSync(): Promise<void> {
     const errorMessage = error instanceof Error ? error.message : String(error);
     await addLogEntry("error", `Sync failed: ${errorMessage}`);
   }
-}
-
-/**
- * Handle browser bookmark events
- */
-function setupBookmarkListeners(): void {
-  // Bookmark created
-  chrome.bookmarks.onCreated.addListener(async (id, node) => {
-    if (!syncEngine) {
-      logger.warn("Sync engine not initialized, ignoring bookmark created");
-      return;
-    }
-
-    // Ignore if it's our sync folder
-    const metadata = await storage.getSyncMetadata();
-    if (metadata && id === metadata.browserRootFolderId) {
-      logger.info("Ignoring sync folder creation:", id);
-      return;
-    }
-
-    logger.info("Bookmark created:", {
-      id,
-      title: node.title,
-      url: node.url,
-      parentId: node.parentId,
-    });
-
-    // Queue as pending change
-    await storage.addPendingChange({
-      id: generateId(),
-      type: "create",
-      source: "browser",
-      browserId: id,
-      parentId: node.parentId,
-      data: {
-        title: node.title,
-        url: node.url,
-      },
-      timestamp: now(),
-      resolved: false,
-    });
-
-    // Trigger debounced sync (will sync 2s after last change)
-    debouncedSync();
-  });
-
-  // Bookmark changed (title or URL)
-  chrome.bookmarks.onChanged.addListener(async (id, changes) => {
-    if (!syncEngine) {
-      logger.warn("Sync engine not initialized, ignoring bookmark changed");
-      return;
-    }
-
-    logger.info("Bookmark changed:", {
-      id,
-      title: changes.title,
-      url: changes.url,
-    });
-
-    // Find mapping to get Linkwarden ID
-    const mapping = await storage.getMappingByBrowserId(id);
-
-    // Queue as pending change
-    await storage.addPendingChange({
-      id: generateId(),
-      type: "update",
-      source: "browser",
-      linkwardenId: mapping?.linkwardenId,
-      browserId: id,
-      data: {
-        title: changes.title,
-        url: changes.url,
-      },
-      timestamp: now(),
-      resolved: false,
-    });
-
-    // Trigger debounced sync
-    debouncedSync();
-  });
-
-  // Bookmark removed
-  chrome.bookmarks.onRemoved.addListener(async (id, removeInfo) => {
-    if (!syncEngine) {
-      logger.warn("Sync engine not initialized, ignoring bookmark removed");
-      return;
-    }
-
-    logger.info("Bookmark removed:", {
-      id,
-      parentId: removeInfo.parentId,
-      node: removeInfo.node,
-    });
-
-    // Find mapping to get Linkwarden ID
-    const mapping = await storage.getMappingByBrowserId(id);
-    logger.info("Mapping for removed bookmark:", {
-      id,
-      hasMapping: !!mapping,
-      linkwardenId: mapping?.linkwardenId,
-    });
-
-    // Skip if no mapping (not a synced item)
-    if (!mapping) {
-      logger.info("No mapping found for removed bookmark, skipping:", id);
-      return;
-    }
-
-    // CRITICAL: Check if this bookmark was just created during the current sync
-    // If browserUpdatedAt is very recent (< 5 seconds), skip the delete
-    // This prevents Chrome sync conflicts from immediately deleting server links
-    const currentTime = Date.now();
-    const justCreated = currentTime - mapping.browserUpdatedAt < 5000;
-
-    if (justCreated) {
-      logger.warn(
-        "Bookmark removed shortly after creation, skipping delete to prevent sync conflict:",
-        {
-          id,
-          linkwardenId: mapping.linkwardenId,
-          age: currentTime - mapping.browserUpdatedAt,
-        }
-      );
-      // Keep the mapping - next sync will recreate the bookmark from server
-      // Don't queue delete, don't remove mapping
-      return;
-    }
-
-    await storage.addPendingChange({
-      id: generateId(),
-      type: "delete",
-      source: "browser",
-      linkwardenId: mapping.linkwardenId,
-      browserId: id,
-      timestamp: Date.now(),
-      resolved: false,
-    });
-
-    logger.info("Queued delete change for bookmark:", {
-      id,
-      linkwardenId: mapping.linkwardenId,
-    });
-
-    // Trigger debounced sync
-    debouncedSync();
-  });
-
-  // Bookmark moved (includes reorder within same folder)
-  chrome.bookmarks.onMoved.addListener(async (id, moveInfo) => {
-    if (!syncEngine) {
-      logger.warn("Sync engine not initialized, ignoring bookmark moved");
-      return;
-    }
-
-    // Find mapping to get Linkwarden ID and type
-    const mapping = await storage.getMappingByBrowserId(id);
-    if (!mapping) {
-      logger.info("No mapping found for moved bookmark, skipping:", id);
-      return; // Not a synced item
-    }
-
-    // Get the node to determine if it's a folder or link
-    const node = await bookmarks.get(id);
-    const isFolder = !node?.url;
-
-    const isReorder = moveInfo.oldParentId === moveInfo.parentId;
-
-    logger.info("Bookmark moved:", {
-      id,
-      isFolder,
-      isReorder,
-      title: node?.title,
-      fromIndex: moveInfo.oldIndex,
-      toIndex: moveInfo.index,
-      oldParentId: moveInfo.oldParentId,
-      newParentId: moveInfo.parentId,
-    });
-
-    // Queue as pending change with full context
-    await storage.addPendingChange({
-      id: generateId(),
-      type: "move",
-      source: "browser",
-      linkwardenId: mapping.linkwardenId,
-      browserId: id,
-      parentId: moveInfo.parentId,
-      index: moveInfo.index, // Capture new index
-      oldParentId: moveInfo.oldParentId, // Capture old parent for reorder detection
-      oldIndex: moveInfo.oldIndex, // Capture old index
-      data: {
-        title: node?.title,
-        url: node?.url,
-      },
-      timestamp: now(),
-      resolved: false,
-    });
-
-    // Update mapping's browserUpdatedAt to track user reorder
-    // This allows restoreOrder to detect that browser was modified after last sync
-    // Note: Don't update browserIndex here - it's updated by restoreOrder() when capturing sibling order
-    mapping.browserUpdatedAt = Date.now();
-    await storage.upsertMapping(mapping);
-
-    // Trigger debounced sync
-    debouncedSync();
-  });
 }
 
 /**
@@ -691,7 +468,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 initSyncEngine();
-setupBookmarkListeners();
 setupMessageListener();
 
 logger.info("Service worker initialized");
