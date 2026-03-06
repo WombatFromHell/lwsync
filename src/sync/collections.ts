@@ -10,7 +10,7 @@
 
 import * as storage from "../storage";
 import * as bookmarks from "../bookmarks";
-import type { LinkwardenAPI } from "../api";
+import { LinkwardenAPI } from "../api";
 import type { LinkwardenCollection } from "../types/api";
 import type { Mapping } from "../types/storage";
 import type { BookmarkNode } from "../types/bookmarks";
@@ -18,6 +18,7 @@ import type { SyncStatsObject } from "./engine";
 import type { SyncStats } from "./engine";
 import { SyncErrorReporter, createErrorContext } from "./errorReporter";
 import { extractMoveToken, removeMoveToken, isDescendantOf } from "./moves";
+import { resolveConflict } from "./conflict";
 import {
   buildPath,
   buildBrowserPath,
@@ -524,6 +525,186 @@ export class CollectionSync {
   }
 
   /**
+   * Sync a single link from Linkwarden to browser
+   * Standalone version with error collection support
+   */
+  async syncLink(
+    link: {
+      id: number;
+      name: string;
+      url: string;
+      updatedAt: string;
+      description?: string;
+    },
+    parentBrowserId: string,
+    errors: string[],
+    stats: {
+      created: number;
+      updated: number;
+      deleted: number;
+      skipped: number;
+    }
+  ): Promise<void> {
+    try {
+      const existing = await storage.getMappingByLinkwardenId(link.id, "link");
+
+      if (existing) {
+        await this.updateExistingLink(link, parentBrowserId, existing, stats);
+      } else {
+        await this.createNewLink(link, parentBrowserId, stats);
+      }
+    } catch (error) {
+      errors.push(
+        `Failed to sync link ${link.id}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Update an existing linked bookmark
+   */
+  private async updateExistingLink(
+    link: {
+      id: number;
+      name: string;
+      url: string;
+      updatedAt: string;
+      description?: string;
+    },
+    parentBrowserId: string,
+    existing: Mapping,
+    stats: {
+      created: number;
+      updated: number;
+      deleted: number;
+      skipped: number;
+    }
+  ): Promise<void> {
+    const result = resolveConflict(existing, link);
+
+    if (result === "use-remote") {
+      // Check if link was moved to a different folder on server
+      const currentNode = await bookmarks.get(existing.browserId);
+      const wasMoved = currentNode?.parentId !== parentBrowserId;
+
+      if (wasMoved) {
+        logger.info("Link moved on server, updating browser:", {
+          linkId: link.id,
+          linkName: link.name,
+          fromParentId: currentNode?.parentId,
+          toParentId: parentBrowserId,
+        });
+
+        await bookmarks.move(existing.browserId, {
+          parentId: parentBrowserId,
+        });
+
+        logger.info("Link move completed in browser:", link.name);
+      }
+
+      // Update browser bookmark title and URL
+      await bookmarks.update(existing.browserId, {
+        title: link.name,
+        url: link.url,
+      });
+
+      existing.browserUpdatedAt = Date.now();
+      existing.checksum = computeChecksum(link);
+      existing.lastSyncedAt = Date.now();
+      await storage.upsertMapping(existing);
+      stats.updated++;
+    } else if (result === "no-op") {
+      // Check if link was moved on server (even if no content change)
+      const currentNode = await bookmarks.get(existing.browserId);
+      const wasMoved = currentNode?.parentId !== parentBrowserId;
+
+      if (wasMoved) {
+        logger.info("Link moved on server (no content change):", {
+          linkId: link.id,
+          linkName: link.name,
+          fromParentId: currentNode?.parentId,
+          toParentId: parentBrowserId,
+        });
+
+        await bookmarks.move(existing.browserId, {
+          parentId: parentBrowserId,
+        });
+
+        logger.info("Link move completed in browser:", link.name);
+      }
+
+      // Just update last synced time
+      existing.lastSyncedAt = Date.now();
+      await storage.upsertMapping(existing);
+    }
+    // "use-local" - browser changes win, do nothing
+  }
+
+  /**
+   * Create a new browser bookmark for a Linkwarden link
+   */
+  private async createNewLink(
+    link: {
+      id: number;
+      name: string;
+      url: string;
+      updatedAt: string;
+      description?: string;
+    },
+    parentBrowserId: string,
+    stats: {
+      created: number;
+      updated: number;
+      deleted: number;
+      skipped: number;
+    }
+  ): Promise<void> {
+    // Check if bookmark already exists by URL
+    const existingBookmarks = await bookmarks.search(link.url);
+    const matchingBookmark = existingBookmarks.find(
+      (b) => b.parentId === parentBrowserId && b.title === link.name
+    );
+
+    if (matchingBookmark) {
+      // Bookmark exists but has no mapping - create mapping (don't duplicate)
+      const mapping: Mapping = {
+        id: crypto.randomUUID(),
+        linkwardenType: "link",
+        linkwardenId: link.id,
+        browserId: matchingBookmark.id,
+        linkwardenUpdatedAt: new Date(link.updatedAt).getTime(),
+        browserUpdatedAt:
+          matchingBookmark.dateGroupModified ||
+          matchingBookmark.dateAdded ||
+          Date.now(),
+        lastSyncedAt: Date.now(),
+        checksum: computeChecksum(link),
+      };
+      await storage.upsertMapping(mapping);
+    } else {
+      // Create new bookmark
+      const node = await bookmarks.create({
+        parentId: parentBrowserId,
+        title: link.name,
+        url: link.url,
+      });
+
+      const mapping: Mapping = {
+        id: crypto.randomUUID(),
+        linkwardenType: "link",
+        linkwardenId: link.id,
+        browserId: node.id,
+        linkwardenUpdatedAt: new Date(link.updatedAt).getTime(),
+        browserUpdatedAt: node.dateAdded || Date.now(),
+        lastSyncedAt: Date.now(),
+        checksum: computeChecksum(link),
+      };
+      await storage.upsertMapping(mapping);
+      stats.created++;
+    }
+  }
+
+  /**
    * Restore bookmark/folder order based on browserIndex mappings
    * Called after all items are synced to reorder efficiently
    * Also detects and captures user reorders (when browser is newer than last sync)
@@ -804,4 +985,36 @@ function computeChecksum(item: { name?: string; url?: string }): string {
     hash = hash & hash;
   }
   return Math.abs(hash).toString(16);
+}
+
+/**
+ * Standalone syncLink function for backward compatibility
+ * Creates a temporary CollectionSync instance to sync a single link
+ */
+export async function syncLink(
+  link: {
+    id: number;
+    name: string;
+    url: string;
+    updatedAt: string;
+    description?: string;
+  },
+  parentBrowserId: string,
+  errors: string[],
+  stats: { created: number; updated: number; deleted: number; skipped: number }
+): Promise<void> {
+  // Create a minimal API client just to satisfy the constructor
+  // Note: This is a backward-compatibility wrapper - consider using CollectionSync directly
+  const envUrl =
+    typeof process !== "undefined" && process.env?.ENDPOINT
+      ? process.env.ENDPOINT
+      : "http://localhost:3000";
+  const envToken =
+    typeof process !== "undefined" && process.env?.API_KEY
+      ? process.env.API_KEY
+      : "dummy-token";
+
+  const api = new LinkwardenAPI(envUrl, envToken);
+  const instance = new CollectionSync(api);
+  await instance.syncLink(link, parentBrowserId, errors, stats);
 }

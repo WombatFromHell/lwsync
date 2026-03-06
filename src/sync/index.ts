@@ -11,6 +11,8 @@ export type { SyncStatsObject, SyncStatType } from "./engine";
 
 // Sync modules
 export { BrowserChangeApplier } from "./browser-changes";
+export type { BatchResult, LinkMove } from "./browser-changes";
+export { BatchOperations, createBatchOperations } from "./browser-changes";
 export { RemoteSync } from "./remote-sync";
 export { CollectionSync } from "./collections";
 export { SyncInitializer } from "./initialization";
@@ -47,8 +49,8 @@ export {
 // Path utilities (re-export for tests)
 export { parseFolderPath } from "../utils";
 
-// Link sync
-export { syncLink } from "./links";
+// Link sync (re-export from collections.ts)
+export { syncLink } from "./collections";
 
 // Sync result type
 export type { SyncResult } from "../types/sync";

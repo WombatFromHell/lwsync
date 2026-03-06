@@ -27,11 +27,11 @@ bun run dev      # Watch mode (rebuild on changes, Chrome only)
 ### Testing
 
 ```bash
-bun test                              # Run all tests (119 tests)
+bun test                              # Run all tests (122 tests)
 bun test tests/sync.test.ts           # Unit tests: pure functions (28 tests)
-bun test tests/storage.test.ts        # Unit tests: storage wrapper (21 tests)
-bun test tests/api.e2e.test.ts        # E2E tests: real Linkwarden API (8 tests)
-bun test tests/sync.integration.test.ts  # Integration tests (62 tests)
+bun test tests/item-order-token.test.ts # Unit tests: order tokens (32 tests)
+bun test tests/smoke.test.ts          # E2E tests: real Linkwarden API (~10s)
+bun test tests/e2e-advanced.test.ts   # E2E tests: advanced scenarios (~15s)
 ```
 
 ### Packaging
@@ -74,8 +74,10 @@ tests/
 | File | Tests | Description |
 |------|-------|-------------|
 | `tests/sync.test.ts` | 28 | Pure functions (checksums, conflicts, move tokens) |
-| `tests/storage.test.ts` | 21 | Storage wrapper with mocked chrome.storage |
-| `tests/api.e2e.test.ts` | 8 | Real Linkwarden API calls |
+| `tests/item-order-token.test.ts` | 32 | Order token utilities (hash generation, parsing) |
+| `tests/smoke.test.ts` | 10 | E2E tests with real Linkwarden API |
+| `tests/e2e-advanced.test.ts` | 8 | Advanced E2E scenarios (conflicts, order preservation) |
+| `tests/performance/parallel.test.ts` | 13 | Parallel operation performance |
 | `tests/sync.integration.test.ts` | 62 | Full sync engine with mocked APIs |
 
 **Test Infrastructure:**

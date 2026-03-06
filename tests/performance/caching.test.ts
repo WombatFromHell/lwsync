@@ -10,7 +10,7 @@ import { setupBrowserMocks, cleanupBrowserMocks } from "../mocks/browser";
 import { MockStorage } from "../mocks/storage";
 import { MockBookmarks } from "../mocks/bookmarks";
 import { MappingCache } from "../../src/sync/mapping-cache";
-import { BatchOperations } from "../../src/sync/batch-operations";
+import { BatchOperations } from "../../src/sync/browser-changes";
 import { createMapping } from "../fixtures/mapping";
 import { uniqueId, uniqueUrl, uniqueTitle } from "../utils/generators";
 import * as storage from "../../src/storage";
