@@ -148,6 +148,19 @@ export class SyncEngine {
       // Step 1: Process pending changes from browser events FIRST
       await this.processPendingChanges();
 
+      // Wait for Linkwarden search index to update after creating links
+      // This prevents false "orphan" detection due to eventual consistency
+      const pending = await storage.getPendingChanges();
+      const hasCreates = pending.some(
+        (c) => c.type === "create" && c.source === "browser"
+      );
+      if (hasCreates) {
+        logger.info(
+          "Waiting for search index to update after link creation (2.5 seconds)..."
+        );
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+      }
+
       // Step 2: Sync from Linkwarden to browser
       const remoteStats = await this.remoteSync.syncFromLinkwarden(metadata);
       stats.addAll(remoteStats);

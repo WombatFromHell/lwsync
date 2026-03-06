@@ -274,26 +274,60 @@ function setupBookmarkListeners(): void {
     logger.info("Bookmark removed:", {
       id,
       parentId: removeInfo.parentId,
+      node: removeInfo.node,
     });
 
     // Find mapping to get Linkwarden ID
     const mapping = await storage.getMappingByBrowserId(id);
-    if (mapping) {
-      await storage.addPendingChange({
-        id: generateId(),
-        type: "delete",
-        source: "browser",
-        linkwardenId: mapping.linkwardenId,
-        browserId: id,
-        timestamp: now(),
-        resolved: false,
-      });
+    logger.info("Mapping for removed bookmark:", {
+      id,
+      hasMapping: !!mapping,
+      linkwardenId: mapping?.linkwardenId,
+    });
 
-      // Trigger debounced sync
-      debouncedSync();
-    } else {
+    // Skip if no mapping (not a synced item)
+    if (!mapping) {
       logger.info("No mapping found for removed bookmark, skipping:", id);
+      return;
     }
+
+    // CRITICAL: Check if this bookmark was just created during the current sync
+    // If browserUpdatedAt is very recent (< 5 seconds), skip the delete
+    // This prevents Chrome sync conflicts from immediately deleting server links
+    const currentTime = Date.now();
+    const justCreated = currentTime - mapping.browserUpdatedAt < 5000;
+
+    if (justCreated) {
+      logger.warn(
+        "Bookmark removed shortly after creation, skipping delete to prevent sync conflict:",
+        {
+          id,
+          linkwardenId: mapping.linkwardenId,
+          age: currentTime - mapping.browserUpdatedAt,
+        }
+      );
+      // Keep the mapping - next sync will recreate the bookmark from server
+      // Don't queue delete, don't remove mapping
+      return;
+    }
+
+    await storage.addPendingChange({
+      id: generateId(),
+      type: "delete",
+      source: "browser",
+      linkwardenId: mapping.linkwardenId,
+      browserId: id,
+      timestamp: Date.now(),
+      resolved: false,
+    });
+
+    logger.info("Queued delete change for bookmark:", {
+      id,
+      linkwardenId: mapping.linkwardenId,
+    });
+
+    // Trigger debounced sync
+    debouncedSync();
   });
 
   // Bookmark moved (includes reorder within same folder)

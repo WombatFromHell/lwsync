@@ -352,98 +352,85 @@ export class LinkwardenAPI {
   }
 
   /**
-   * Get links by collection with pagination support
-   * Uses GET /api/v1/search?collectionId=:id&cursor=:num
-   * Handles large collections by fetching all pages
+   * Get links by collection
+   * Uses GET /api/v1/links?collectionId=:id (bypasses broken search index)
    *
-   * Note: Uses retry logic for eventual consistency (search index may lag)
+   * Note: The /api/v1/search endpoint has eventual consistency issues.
+   * This method uses /api/v1/links which queries the database directly.
    */
   async getLinksByCollection(collectionId: number): Promise<LinkwardenLink[]> {
-    logger.debug("Fetching links for collection:", collectionId);
+    logger.debug(
+      "Fetching links for collection (direct DB query):",
+      collectionId
+    );
 
-    const maxRetries = 3;
-    const retryDelay = 100; // ms
+    try {
+      const allLinks: LinkwardenLink[] = [];
+      let cursor: number | undefined = 0;
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        const allLinks: LinkwardenLink[] = [];
-        let cursor: number | undefined = 0;
-
-        while (cursor !== undefined) {
-          const responseData: unknown = await this.request(
-            `/search?collectionId=${collectionId}&cursor=${cursor}`
-          );
-
-          // Handle different response formats
-          let links: LinkwardenLink[] = [];
-          let nextCursor: number | null | undefined;
-
-          if (
-            responseData &&
-            typeof responseData === "object" &&
-            "data" in responseData &&
-            responseData.data &&
-            typeof responseData.data === "object" &&
-            "links" in responseData.data
-          ) {
-            // Format: { data: { links: [], nextCursor: number } }
-            const data = responseData.data as {
-              links: LinkwardenLink[];
-              nextCursor?: number | null;
-            };
-            links = data.links;
-            nextCursor = data.nextCursor;
-          } else if (
-            responseData &&
-            typeof responseData === "object" &&
-            "links" in responseData
-          ) {
-            // Format: { links: [], nextCursor: number }
-            const data = responseData as {
-              links: LinkwardenLink[];
-              nextCursor?: number | null;
-            };
-            links = data.links;
-            nextCursor = data.nextCursor;
-          } else if (Array.isArray(responseData)) {
-            // Format: []
-            links = responseData;
-            nextCursor = undefined;
-          }
-
-          allLinks.push(...links);
-
-          // Continue if there's a next cursor
-          cursor = nextCursor ?? undefined;
-        }
-
-        logger.debug(
-          "Fetched links via /search for collection:",
-          collectionId,
-          "count:",
-          allLinks.length
+      while (cursor !== undefined) {
+        const responseData: unknown = await this.request(
+          `/links?collectionId=${collectionId}&cursor=${cursor}`
         );
-        return allLinks;
-      } catch (error) {
-        // Retry on transient errors
-        if (attempt < maxRetries) {
-          logger.debug(
-            `Search attempt ${attempt} failed, retrying in ${retryDelay}ms:`,
-            error instanceof Error ? error.message : String(error)
-          );
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-        } else {
-          logger.error(
-            "Failed to fetch links via /search after retries:",
-            collectionId,
-            error
-          );
-          return [];
-        }
-      }
-    }
 
-    return [];
+        // Handle different response formats
+        let links: LinkwardenLink[] = [];
+        let nextCursor: number | null | undefined;
+
+        if (
+          responseData &&
+          typeof responseData === "object" &&
+          "data" in responseData &&
+          responseData.data &&
+          typeof responseData.data === "object" &&
+          "links" in responseData.data
+        ) {
+          // Format: { data: { links: [], nextCursor: number } }
+          const data = responseData.data as {
+            links: LinkwardenLink[];
+            nextCursor?: number | null;
+          };
+          links = data.links;
+          nextCursor = data.nextCursor;
+        } else if (
+          responseData &&
+          typeof responseData === "object" &&
+          "links" in responseData
+        ) {
+          // Format: { links: [], nextCursor: number }
+          const data = responseData as {
+            links: LinkwardenLink[];
+            nextCursor?: number | null;
+          };
+          links = data.links;
+          nextCursor = data.nextCursor;
+        } else if (Array.isArray(responseData)) {
+          // Format: []
+          links = responseData;
+          nextCursor = undefined;
+        }
+
+        allLinks.push(...links);
+
+        // Continue if there's a next cursor
+        cursor = nextCursor ?? undefined;
+      }
+
+      logger.debug(
+        "Fetched links via /links for collection:",
+        collectionId,
+        "count:",
+        allLinks.length
+      );
+      return allLinks;
+    } catch (error) {
+      logger.error(
+        "Failed to fetch links via /links:",
+        collectionId,
+        error instanceof Error ? error.message : String(error)
+      );
+      return [];
+    }
   }
 }
 

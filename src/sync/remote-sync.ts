@@ -90,7 +90,6 @@ export class RemoteSync {
 
       // SAFETY CHECK: Don't cleanup orphans if we got NOTHING from server
       // This prevents accidental deletion when API fetch fails completely
-      // We DO cleanup if we have collections but no links (valid empty state)
       const hasAnyRemoteData =
         remoteLinkIds.size > 0 || remoteCollectionIds.size > 0;
 
@@ -100,12 +99,32 @@ export class RemoteSync {
             "This indicates an API failure. Check connection and collection ID."
         );
       } else {
-        // Cleanup orphaned mappings
-        await this.cleanupOrphans(
-          remoteLinkIds,
-          remoteCollectionIds,
-          rootFolderId
-        );
+        // CRITICAL: Only cleanup link orphans if we actually fetched links from server
+        // This prevents deleting ALL bookmarks when link fetch fails but collection
+        // fetch succeeds (e.g., API error returns 0 links)
+        if (remoteLinkIds.size > 0) {
+          // Cleanup orphaned link mappings
+          await this.cleanupOrphanedMappings(
+            remoteLinkIds,
+            "link",
+            rootFolderId
+          );
+        } else {
+          logger.warn(
+            "Skipping link orphan cleanup - API returned 0 links. " +
+              "This indicates an API failure or empty collection. " +
+              "Existing bookmarks will NOT be deleted to prevent data loss."
+          );
+        }
+
+        // Cleanup orphaned collection mappings (if we have any remote collections)
+        if (remoteCollectionIds.size > 0) {
+          await this.cleanupOrphanedMappings(
+            remoteCollectionIds,
+            "collection",
+            rootFolderId
+          );
+        }
       }
 
       logger.info("Remote sync complete:", stats.toString());
@@ -233,21 +252,31 @@ export class RemoteSync {
   }
 
   /**
-   * Cleanup orphaned mappings
+   * Cleanup orphaned mappings for a specific type (link or collection)
    */
-  private async cleanupOrphans(
-    remoteLinkIds: Set<number>,
-    remoteCollectionIds: Set<number>,
+  private async cleanupOrphanedMappings(
+    remoteIds: Set<number>,
+    type: "link" | "collection",
     browserRootFolderId: string
   ): Promise<void> {
     const orphanCleanup = new (await import("./orphans")).OrphanCleanup(
       this.errors
     );
-    await orphanCleanup.cleanupOrphanedMappings(
-      remoteLinkIds,
-      remoteCollectionIds,
-      browserRootFolderId
-    );
+
+    // Pass IDs to appropriate parameter based on type
+    if (type === "link") {
+      await orphanCleanup.cleanupOrphanedMappings(
+        remoteIds,
+        new Set<number>(), // No collection orphans
+        browserRootFolderId
+      );
+    } else {
+      await orphanCleanup.cleanupOrphanedMappings(
+        new Set<number>(), // No link orphans
+        remoteIds,
+        browserRootFolderId
+      );
+    }
 
     // Normalize indices after deletions
     await orphanCleanup.normalizeIndices(browserRootFolderId);

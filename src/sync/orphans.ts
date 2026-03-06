@@ -24,6 +24,7 @@ export class OrphanCleanup {
   /**
    * Cleanup orphaned mappings
    * Removes mappings and browser bookmarks for items deleted from Linkwarden
+   * @param remoteLinkIds - Set of link IDs from server (empty Set means API failure, skip link cleanup)
    */
   async cleanupOrphanedMappings(
     remoteLinkIds: Set<number>,
@@ -31,11 +32,13 @@ export class OrphanCleanup {
     browserRootFolderId: string
   ): Promise<void> {
     try {
-      // Find orphaned link mappings
-      const orphanedLinks = await this.findOrphanedMappings(
-        remoteLinkIds,
-        "link"
-      );
+      // CRITICAL: Skip link orphan cleanup if remoteLinkIds is empty
+      // An empty Set indicates API failure, not an empty collection
+      // Cleaning up in this case would delete ALL bookmarks
+      const orphanedLinks =
+        remoteLinkIds.size > 0
+          ? await this.findOrphanedMappings(remoteLinkIds, "link")
+          : [];
 
       // Find orphaned collection mappings
       const orphanedCollections = await this.findOrphanedMappings(
@@ -186,7 +189,7 @@ export class OrphanCleanup {
       for (const mapping of allMappings) {
         // Get the bookmark to find its parent
         const node = await bookmarks.get(mapping.browserId);
-        if (!node) continue; // Bookmark was deleted
+        if (!node) continue; // Bookmark was deleted or doesn't exist
 
         const parentId = node.parentId || "unknown";
         const group = byParent.get(parentId) || [];
@@ -199,7 +202,28 @@ export class OrphanCleanup {
         if (group.length === 0) continue;
 
         // Get current order in the folder
-        const children = await bookmarks.getChildren(parentId);
+        let children: import("../types/bookmarks").BookmarkNode[];
+        try {
+          children = await bookmarks.getChildren(parentId);
+        } catch (error) {
+          // Parent folder doesn't exist or can't be accessed - skip
+          logger.debug(
+            `Skipping normalizeIndices for parent ${parentId}: folder not accessible`
+          );
+          continue;
+        }
+
+        if (children.length === 0) {
+          // Empty folder - clear all indices
+          for (const mapping of group) {
+            if (mapping.browserIndex !== undefined) {
+              mapping.browserIndex = undefined;
+              await storage.upsertMapping(mapping);
+            }
+          }
+          continue;
+        }
+
         const childOrder = new Map<string, number>();
         children.forEach((child, index) => {
           childOrder.set(child.id, index);

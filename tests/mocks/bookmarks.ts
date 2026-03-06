@@ -17,8 +17,8 @@ export interface MockBookmarkNode {
 }
 
 interface ChangeInfo {
-  title?: string;
-  url?: string;
+  title?: { newValue?: string };
+  url?: { newValue?: string };
 }
 
 interface RemoveInfo {
@@ -36,7 +36,7 @@ interface MoveInfo {
 }
 
 interface EventListeners {
-  onCreated: ((node: chrome.bookmarks.BookmarkTreeNode) => void)[];
+  onCreated: ((id: string, node: chrome.bookmarks.BookmarkTreeNode) => void)[];
   onChanged: ((id: string, changes: ChangeInfo) => void)[];
   onRemoved: ((id: string, removeInfo: RemoveInfo) => void)[];
   onMoved: ((id: string, moveInfo: MoveInfo) => void)[];
@@ -138,9 +138,11 @@ export class MockBookmarks {
       }
     }
 
-    // Fire event
+    // Fire event (match real Chrome API signature: id, bookmark)
     const chromeNode = this.toChromeNode(newNode);
-    this.eventListeners.onCreated.forEach((cb) => cb(chromeNode));
+    this.eventListeners.onCreated.forEach((cb) =>
+      cb(chromeNode.id, chromeNode)
+    );
 
     const promise = Promise.resolve(chromeNode);
 
@@ -214,10 +216,10 @@ export class MockBookmarks {
     const now = Date.now();
 
     if (changes.title !== undefined) {
-      node.title = changes.title;
+      node.title = changes.title.newValue ?? "";
     }
     if (changes.url !== undefined) {
-      node.url = changes.url;
+      node.url = changes.url.newValue ?? "";
     }
 
     node.dateGroupModified = now;
@@ -601,12 +603,12 @@ export class MockBookmarks {
       search: this.search.bind(this),
       onCreated: {
         addListener: (
-          cb: (node: chrome.bookmarks.BookmarkTreeNode) => void
+          cb: (id: string, node: chrome.bookmarks.BookmarkTreeNode) => void
         ) => {
           this.eventListeners.onCreated.push(cb);
         },
         removeListener: (
-          cb: (node: chrome.bookmarks.BookmarkTreeNode) => void
+          cb: (id: string, node: chrome.bookmarks.BookmarkTreeNode) => void
         ) => {
           this.eventListeners.onCreated = this.eventListeners.onCreated.filter(
             (c) => c !== cb
