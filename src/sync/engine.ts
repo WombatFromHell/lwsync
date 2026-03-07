@@ -12,6 +12,7 @@
 import type { LinkwardenAPI } from "../api";
 import type { SyncMetadata } from "../types/storage";
 import type { PendingChange } from "../types/storage";
+import type { Mapping } from "../types/storage";
 import type { SyncResult } from "../types/sync";
 import type { SyncComparison, ComparisonOptions } from "../types/comparator";
 import * as storage from "../storage";
@@ -21,7 +22,6 @@ import { RemoteSync } from "./remote-sync";
 import { SyncInitializer } from "./initialization";
 import { OrphanCleanup } from "./orphans";
 import { SyncComparator } from "./comparator";
-import { MappingCache } from "./mapping-cache";
 import { createLogger } from "../utils";
 
 const logger = createLogger("LWSync engine");
@@ -66,11 +66,55 @@ export class SyncStats {
   }
 }
 
+/**
+ * Simple mapping cache using Map for O(1) lookups
+ */
+class MappingMap {
+  private byLinkwardenId = new Map<string, Mapping>();
+  private byBrowserId = new Map<string, Mapping>();
+
+  get size(): number {
+    return this.byLinkwardenId.size;
+  }
+
+  async load(): Promise<void> {
+    const mappings = await storage.getMappings();
+    this.byLinkwardenId.clear();
+    this.byBrowserId.clear();
+    for (const mapping of mappings) {
+      const key = `${mapping.linkwardenType}:${mapping.linkwardenId}`;
+      this.byLinkwardenId.set(key, mapping);
+      this.byBrowserId.set(mapping.browserId, mapping);
+    }
+  }
+
+  getMappingByLinkwardenId(
+    id: number,
+    type: "link" | "collection"
+  ): Mapping | undefined {
+    return this.byLinkwardenId.get(`${type}:${id}`);
+  }
+
+  getMappingByBrowserId(browserId: string): Mapping | undefined {
+    return this.byBrowserId.get(browserId);
+  }
+
+  upsert(mapping: Mapping): void {
+    const key = `${mapping.linkwardenType}:${mapping.linkwardenId}`;
+    const existing = this.byLinkwardenId.get(key);
+    if (existing) {
+      this.byBrowserId.delete(existing.browserId);
+    }
+    this.byLinkwardenId.set(key, mapping);
+    this.byBrowserId.set(mapping.browserId, mapping);
+  }
+}
+
 export class SyncEngine {
   private api: LinkwardenAPI;
   private isSyncing = false;
   private errors: SyncErrorReporter;
-  private mappingCache: MappingCache;
+  private mappingMap: MappingMap;
 
   // Module instances
   private browserChanges: BrowserChangeApplier;
@@ -82,21 +126,21 @@ export class SyncEngine {
   constructor(api: LinkwardenAPI) {
     this.api = api;
     this.errors = new SyncErrorReporter();
-    this.mappingCache = new MappingCache();
+    this.mappingMap = new MappingMap();
 
-    // Initialize module instances with cache
+    // Initialize module instances with mapping map
     this.browserChanges = new BrowserChangeApplier(
       this.api,
       this.errors,
-      this.mappingCache
+      this.mappingMap
     );
-    this.remoteSync = new RemoteSync(this.api, this.errors, this.mappingCache);
+    this.remoteSync = new RemoteSync(this.api, this.errors, this.mappingMap);
     this.initializer = new SyncInitializer(this.api, this.errors);
-    this.orphans = new OrphanCleanup(this.errors, this.mappingCache);
+    this.orphans = new OrphanCleanup(this.errors, this.mappingMap);
     this.comparator = new SyncComparator(
       this.api,
       this.errors,
-      this.mappingCache
+      this.mappingMap
     );
   }
 
@@ -147,9 +191,9 @@ export class SyncEngine {
     this.isSyncing = true;
 
     try {
-      // Load mapping cache once at start of sync
-      await this.mappingCache.load();
-      logger.info("Loaded mapping cache:", { count: this.mappingCache.size });
+      // Load mapping map once at start of sync
+      await this.mappingMap.load();
+      logger.info("Loaded mapping map:", { count: this.mappingMap.size });
 
       logger.info("Starting sync:", {
         targetCollectionId: metadata.targetCollectionId,
@@ -258,7 +302,7 @@ export class SyncEngine {
         change.linkwardenId !== undefined
       ) {
         // Check if it's a link (not a folder)
-        const mapping = this.mappingCache.getMappingByBrowserId(
+        const mapping = this.mappingMap.getMappingByBrowserId(
           change.browserId!
         );
         if (mapping?.linkwardenType === "link") {
@@ -277,7 +321,7 @@ export class SyncEngine {
         change.source === "browser" &&
         change.linkwardenId !== undefined
       ) {
-        const mapping = this.mappingCache.getMappingByBrowserId(
+        const mapping = this.mappingMap.getMappingByBrowserId(
           change.browserId!
         );
         if (mapping?.linkwardenType === "link") {

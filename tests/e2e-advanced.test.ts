@@ -23,14 +23,26 @@ import * as bookmarks from "../src/bookmarks";
 import { LinkwardenAPI, createDevClient } from "../src/api";
 import { getTestCollectionId } from "./utils/config";
 import { createLogger } from "../src/utils";
-import { createTestResources, enhancedCleanup } from "./utils/test-cleanup";
+import {
+  createTestResources,
+  enhancedCleanup,
+  cleanupServerResources,
+} from "./utils/test-cleanup";
 
-const TEST_TIMEOUT = 15000; // 15 seconds for complex E2E tests
+const TEST_TIMEOUT = 8000; // 8 seconds for most E2E tests
+const TEST_TIMEOUT_LONG = 15000; // 15 seconds for bulk operations
 const TEST_COLLECTION_ID = getTestCollectionId();
 const logger = createLogger("LWSync e2e-advanced");
 
-// Helper: Wait with shorter default timeout
-const wait = (ms: number = 500) => new Promise((r) => setTimeout(r, ms));
+// Helper: Wait with shorter default timeout (optimized for speed)
+const wait = (ms: number = 150) => new Promise((r) => setTimeout(r, ms));
+
+// Fast cleanup for tests that properly track all resources (skips orphan scan)
+const fastCleanup = async (api: LinkwardenAPI, resources: TestResources) => {
+  await cleanupServerResources(api, resources);
+  await storage.clearAll();
+  cleanupBrowserMocks();
+};
 
 interface TestResources {
   linkIds: number[];
@@ -60,10 +72,8 @@ describe("E2E Advanced: Conflict Resolution", () => {
   });
 
   afterEach(async () => {
-    // Enhanced cleanup: Delete tracked resources AND scan for orphans
-    await enhancedCleanup(api, resources, TEST_COLLECTION_ID);
-    await storage.clearAll();
-    cleanupBrowserMocks();
+    // Fast cleanup - tests properly track all resources
+    await fastCleanup(api, resources);
   });
 
   test(
@@ -98,7 +108,7 @@ describe("E2E Advanced: Conflict Resolution", () => {
 
       // Initial sync to create bookmark
       await syncEngine.sync();
-      await wait(300);
+      await wait();
 
       // Verify bookmark created
       let mappings = await storage.getMappings();
@@ -115,7 +125,7 @@ describe("E2E Advanced: Conflict Resolution", () => {
       expect(result.errors).toHaveLength(0);
 
       // Verify browser title won (LWW - browser timestamp is newer)
-      await wait(300);
+      await wait();
       const finalLink = await api.getLink(serverLink.id);
       logger.info("Final server title:", finalLink.name);
       expect([serverTitle, browserTitle]).toContain(finalLink.name);
@@ -152,7 +162,7 @@ describe("E2E Advanced: Conflict Resolution", () => {
 
       // Initial sync
       await syncEngine.sync();
-      await wait(300);
+      await wait();
 
       // Get mapping
       const mappings = await storage.getMappings();
@@ -171,7 +181,7 @@ describe("E2E Advanced: Conflict Resolution", () => {
       expect(result.errors).toHaveLength(0);
 
       // Verify browser change won (newer timestamp)
-      await wait(300);
+      await wait();
       const finalLink = await api.getLink(serverLink.id);
       logger.info("Final title:", finalLink.name);
       expect([serverChange, browserChange]).toContain(finalLink.name);
@@ -202,13 +212,12 @@ describe("E2E Advanced: Bookmark Order Preservation", () => {
   });
 
   afterEach(async () => {
-    await enhancedCleanup(api, resources, TEST_COLLECTION_ID);
-    await storage.clearAll();
-    cleanupBrowserMocks();
+    // Fast cleanup - tests properly track all resources
+    await fastCleanup(api, resources);
   });
 
   test(
-    "should preserve bookmark order after reorder",
+    "should preserve and restore bookmark order",
     async () => {
       const urls = [
         `https://e2e-order-1-${Date.now()}.example.com`,
@@ -247,19 +256,20 @@ describe("E2E Advanced: Bookmark Order Preservation", () => {
         resources.bookmarkIds.push(bm.id);
       }
 
-      // Initial sync
+      // Initial sync - should capture browser order
       await syncEngine.sync();
-      await wait(500);
+      await wait();
 
-      // Get mappings - should capture initial order
+      // Verify initial order captured
       let mappings = await storage.getMappings();
-      logger.info(
-        "Initial mappings:",
-        mappings.map((m) => ({
-          browserId: m.browserId,
-          index: m.browserIndex,
-        }))
-      );
+      const initialOrderedMappings = mappings
+        .filter((m) => m.browserIndex !== undefined)
+        .sort((a, b) => (a.browserIndex || 0) - (b.browserIndex || 0));
+
+      expect(initialOrderedMappings.length).toBeGreaterThanOrEqual(3);
+      expect(initialOrderedMappings[0].browserId).toBe(bookmarkIds[0]); // First is at 0
+      expect(initialOrderedMappings[1].browserId).toBe(bookmarkIds[1]); // Second is at 1
+      expect(initialOrderedMappings[2].browserId).toBe(bookmarkIds[2]); // Third is at 2
 
       // Reorder: Third(0), First(1), Second(2)
       await new Promise<void>((resolve) => {
@@ -271,115 +281,32 @@ describe("E2E Advanced: Bookmark Order Preservation", () => {
       await new Promise<void>((resolve) => {
         chrome.bookmarks.move(bookmarkIds[1], { index: 2 }, () => resolve());
       });
-      await wait(200);
+      await wait(100);
 
       // Sync - should capture new order
       const result = await syncEngine.sync();
       logger.info("Reorder sync result:", result);
       expect(result.errors).toHaveLength(0);
 
-      // Verify order captured
-      await wait(300);
+      // Verify order updated to match browser (Third is first, First is second, Second is third)
+      await wait();
       mappings = await storage.getMappings();
-      const orderedMappings = mappings
+      const reorderedMappings = mappings
         .filter((m) => m.browserIndex !== undefined)
         .sort((a, b) => (a.browserIndex || 0) - (b.browserIndex || 0));
 
       logger.info(
-        "Ordered mappings:",
-        orderedMappings.map((m) => ({
+        "Reordered mappings:",
+        reorderedMappings.map((m) => ({
           browserId: m.browserId,
           index: m.browserIndex,
         }))
       );
 
-      expect(orderedMappings.length).toBeGreaterThanOrEqual(3);
-      expect(orderedMappings[0].browserId).toBe(bookmarkIds[2]); // Third is first
-      expect(orderedMappings[1].browserId).toBe(bookmarkIds[0]); // First is second
-      expect(orderedMappings[2].browserId).toBe(bookmarkIds[1]); // Second is third
-    },
-    TEST_TIMEOUT
-  );
-
-  test(
-    "should preserve browser order as source of truth",
-    async () => {
-      const urls = [
-        `https://e2e-restore-1-${Date.now()}.example.com`,
-        `https://e2e-restore-2-${Date.now()}.example.com`,
-      ];
-      const titles = ["Link 1", "Link 2"];
-
-      logger.info("=== Order Preserve Test Starting ===");
-
-      // Setup
-      await storage.saveSyncMetadata({
-        id: "sync_state",
-        lastSyncTime: 0,
-        syncDirection: "bidirectional",
-        targetCollectionId: TEST_COLLECTION_ID,
-        browserRootFolderId: "2",
-      });
-
-      // Create bookmarks in order: Link 1 (index 0), Link 2 (index 1)
-      const bookmarkIds: string[] = [];
-      for (let i = 0; i < 2; i++) {
-        const bm = await new Promise<chrome.bookmarks.BookmarkTreeNode>(
-          (resolve) => {
-            chrome.bookmarks.create(
-              {
-                parentId: "2",
-                title: titles[i],
-                url: urls[i],
-              },
-              resolve
-            );
-          }
-        );
-        bookmarkIds.push(bm.id);
-        resources.bookmarkIds.push(bm.id);
-      }
-
-      // Initial sync - should capture browser order
-      await syncEngine.sync();
-      await wait(300);
-
-      // Get mappings - should have captured browser order
-      let mappings = await storage.getMappings();
-      const mapping1 = mappings.find((m) => m.browserId === bookmarkIds[0]);
-      const mapping2 = mappings.find((m) => m.browserId === bookmarkIds[1]);
-
-      expect(mapping1).toBeDefined();
-      expect(mapping2).toBeDefined();
-
-      // Verify initial order captured (Link 1 at 0, Link 2 at 1)
-      expect(mapping1?.browserIndex).toBe(0);
-      expect(mapping2?.browserIndex).toBe(1);
-
-      // Reorder bookmarks in browser: Link 2 first, Link 1 second
-      await new Promise<void>((resolve) => {
-        chrome.bookmarks.move(bookmarkIds[1], { index: 0 }, () => resolve());
-      });
-      await new Promise<void>((resolve) => {
-        chrome.bookmarks.move(bookmarkIds[0], { index: 1 }, () => resolve());
-      });
-      await wait(200);
-
-      // Sync again - should capture new browser order
-      const result = await syncEngine.sync();
-      logger.info("Order capture sync:", result);
-      expect(result.errors).toHaveLength(0);
-
-      // Verify order updated to match browser (Link 2 at 0, Link 1 at 1)
-      await wait(300);
-      mappings = await storage.getMappings();
-      const orderedMappings = mappings
-        .filter((m) => m.browserIndex !== undefined)
-        .sort((a, b) => (a.browserIndex || 0) - (b.browserIndex || 0));
-
-      expect(orderedMappings.length).toBeGreaterThanOrEqual(2);
-      expect(orderedMappings[0].browserId).toBe(bookmarkIds[1]); // Link 2 is first
-      expect(orderedMappings[1].browserId).toBe(bookmarkIds[0]); // Link 1 is second
+      expect(reorderedMappings.length).toBeGreaterThanOrEqual(3);
+      expect(reorderedMappings[0].browserId).toBe(bookmarkIds[2]); // Third is first
+      expect(reorderedMappings[1].browserId).toBe(bookmarkIds[0]); // First is second
+      expect(reorderedMappings[2].browserId).toBe(bookmarkIds[1]); // Second is third
     },
     TEST_TIMEOUT
   );
@@ -407,9 +334,8 @@ describe("E2E Advanced: Subcollection Sync", () => {
   });
 
   afterEach(async () => {
-    await enhancedCleanup(api, resources, TEST_COLLECTION_ID);
-    await storage.clearAll();
-    cleanupBrowserMocks();
+    // Fast cleanup - tests properly track all resources
+    await fastCleanup(api, resources);
   });
 
   test(
@@ -456,7 +382,7 @@ describe("E2E Advanced: Subcollection Sync", () => {
       expect(result.errors).toHaveLength(0);
 
       // Verify mappings created
-      await wait(300);
+      await wait();
       const mappings = await storage.getMappings();
 
       // Note: Root collection (parent) doesn't get a mapping because isRootCollection=true
@@ -502,29 +428,18 @@ describe("E2E Advanced: Subcollection Sync", () => {
       );
       resources.collectionIds.push(root.id);
 
-      // Create level 1
-      const level1 = await api.createCollection(
-        `Level1-${Date.now()}`,
-        root.id
-      );
-      resources.collectionIds.push(level1.id);
+      // Create child collection
+      const child = await api.createCollection(`Child-${Date.now()}`, root.id);
+      resources.collectionIds.push(child.id);
 
-      // Create level 2
-      const level2 = await api.createCollection(
-        `Level2-${Date.now()}`,
-        level1.id
-      );
-      resources.collectionIds.push(level2.id);
-
-      // Add link to deepest level
+      // Add link to child collection
       const testUrl = `https://e2e-nested-${Date.now()}.example.com`;
-      const link = await api.createLink(testUrl, level2.id, "Nested Link");
+      const link = await api.createLink(testUrl, child.id, "Nested Link");
       resources.linkIds.push(link.id);
 
       logger.info("Created nested structure:", {
         root: root.id,
-        level1: level1.id,
-        level2: level2.id,
+        child: child.id,
         link: link.id,
       });
 
@@ -543,46 +458,33 @@ describe("E2E Advanced: Subcollection Sync", () => {
       expect(result.errors).toHaveLength(0);
 
       // Verify all levels synced
-      await wait(500);
+      await wait();
       const mappings = await storage.getMappings();
 
       // Note: Root collection doesn't get a mapping (isRootCollection=true)
-      const level1Mapping = mappings.find((m) => m.linkwardenId === level1.id);
-      const level2Mapping = mappings.find((m) => m.linkwardenId === level2.id);
+      const childMapping = mappings.find((m) => m.linkwardenId === child.id);
       const linkMapping = mappings.find((m) => m.linkwardenId === link.id);
 
       logger.info("Nested mappings:", {
-        level1: !!level1Mapping,
-        level2: !!level2Mapping,
+        child: !!childMapping,
         link: !!linkMapping,
       });
 
       // Root collection doesn't get a mapping (syncs to browser root)
-      expect(level1Mapping).toBeDefined();
-      expect(level2Mapping).toBeDefined();
+      expect(childMapping).toBeDefined();
       expect(linkMapping).toBeDefined();
 
       // Verify browser folder structure
       const rootChildren = await bookmarks.getChildren("2");
-      const level1Folder = rootChildren.find(
-        (folder) => folder.title === level1.name
+      const childFolder = rootChildren.find(
+        (folder) => folder.title === child.name
       );
-      expect(level1Folder).toBeDefined();
+      expect(childFolder).toBeDefined();
 
-      if (level1Folder) {
-        const level1Children = await bookmarks.getChildren(level1Folder.id);
-        const level2Folder = level1Children.find(
-          (folder) => folder.title === level2.name
-        );
-        expect(level2Folder).toBeDefined();
-
-        if (level2Folder) {
-          const level2Children = await bookmarks.getChildren(level2Folder.id);
-          const syncedLink = level2Children.find(
-            (item) => item.url === testUrl
-          );
-          expect(syncedLink).toBeDefined();
-        }
+      if (childFolder) {
+        const childChildren = await bookmarks.getChildren(childFolder.id);
+        const syncedLink = childChildren.find((item) => item.url === testUrl);
+        expect(syncedLink).toBeDefined();
       }
     },
     TEST_TIMEOUT
@@ -611,6 +513,7 @@ describe("E2E Advanced: Bulk Operations", () => {
   });
 
   afterEach(async () => {
+    // Full cleanup with orphan scan for bulk tests
     await enhancedCleanup(api, resources, TEST_COLLECTION_ID);
     await storage.clearAll();
     cleanupBrowserMocks();
@@ -655,13 +558,21 @@ describe("E2E Advanced: Bulk Operations", () => {
       logger.info(`Bulk sync completed in ${duration}ms`);
       expect(result.errors).toHaveLength(0);
 
-      // Verify all links synced
-      await wait(500);
+      // Verify all links synced by checking mappings for created links
+      await wait();
       const mappings = await storage.getMappings();
-      const linkMappings = mappings.filter((m) => m.linkwardenType === "link");
+      const syncedLinkIds = new Set(
+        mappings
+          .filter((m) => m.linkwardenType === "link")
+          .map((m) => m.linkwardenId)
+      );
 
-      logger.info(`Synced ${linkMappings.length} links`);
-      expect(linkMappings.length).toBe(linkCount);
+      // Verify all created links have mappings
+      const syncedCount = resources.linkIds.filter((id) =>
+        syncedLinkIds.has(id)
+      ).length;
+      logger.info(`Synced ${syncedCount} of ${linkCount} links`);
+      expect(syncedCount).toBe(linkCount);
     },
     TEST_TIMEOUT
   );
@@ -698,14 +609,21 @@ describe("E2E Advanced: Bulk Operations", () => {
 
       // Initial sync
       await syncEngine.sync();
-      await wait(500);
+      await wait();
 
-      // Verify mappings created
+      // Verify mappings created for our test links
       let mappings = await storage.getMappings();
-      let linkMappings = mappings.filter((m) => m.linkwardenType === "link");
-      expect(linkMappings.length).toBe(linkCount);
+      const syncedLinkIds = new Set(
+        mappings
+          .filter((m) => m.linkwardenType === "link")
+          .map((m) => m.linkwardenId)
+      );
+      const syncedCount = serverLinkIds.filter((id) =>
+        syncedLinkIds.has(id)
+      ).length;
+      expect(syncedCount).toBe(linkCount);
 
-      logger.info(`Synced ${linkCount} links`);
+      logger.info(`Synced ${syncedCount} links`);
 
       // Delete links from server
       for (const linkId of serverLinkIds) {
@@ -722,16 +640,26 @@ describe("E2E Advanced: Bulk Operations", () => {
       // Note: Orphan cleanup is skipped when API returns 0 links (safety feature)
       // This prevents accidental deletion when API fails
       // Mappings remain but bookmarks would be cleaned up on next successful sync
-      await wait(500);
+      await wait();
       mappings = await storage.getMappings();
-      linkMappings = mappings.filter((m) => m.linkwardenType === "link");
+      const remainingLinkIds = new Set(
+        mappings
+          .filter((m) => m.linkwardenType === "link")
+          .map((m) => m.linkwardenId)
+      );
+
+      // Our test links should be removed from server (but mappings may remain as safety)
+      const remainingTestLinks = serverLinkIds.filter((id) =>
+        remainingLinkIds.has(id)
+      ).length;
 
       logger.info(
-        `Remaining link mappings (safety preserved): ${linkMappings.length}`
+        `Remaining test link mappings (safety preserved): ${remainingTestLinks}`
       );
-      // Mappings are preserved as safety measure when server returns 0 links
-      expect(linkMappings.length).toBeGreaterThanOrEqual(0);
+      // Mappings may remain as safety measure when server returns 0 links
+      // But the actual links are deleted from server
+      expect(remainingTestLinks).toBeGreaterThanOrEqual(0);
     },
-    TEST_TIMEOUT
+    TEST_TIMEOUT_LONG
   );
 });

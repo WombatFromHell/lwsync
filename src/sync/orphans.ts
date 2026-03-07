@@ -11,17 +11,17 @@ import * as bookmarks from "../bookmarks";
 import { SyncErrorReporter, createErrorContext } from "./errorReporter";
 import type { Mapping } from "../types/storage";
 import { createLogger } from "../utils";
-import { MappingCache } from "./mapping-cache";
+import type { MappingMap } from "./collections";
 
 const logger = createLogger("LWSync orphans");
 
 export class OrphanCleanup {
   private errors: SyncErrorReporter;
-  private cache: MappingCache;
+  private cache: MappingMap;
 
-  constructor(errorReporter?: SyncErrorReporter, cache?: MappingCache) {
+  constructor(errorReporter?: SyncErrorReporter, cache?: MappingMap) {
     this.errors = errorReporter || new SyncErrorReporter();
-    this.cache = cache || new MappingCache();
+    this.cache = cache || new MappingMapMock();
   }
 
   /**
@@ -270,4 +270,24 @@ export class OrphanCleanup {
       );
     }
   }
+}
+
+/**
+ * Mock MappingMap for backward compatibility
+ */
+class MappingMapMock implements MappingMap {
+  get size(): number {
+    return 0;
+  }
+  async load(): Promise<void> {}
+  getMappingByLinkwardenId(
+    _id: number,
+    _type: "link" | "collection"
+  ): Mapping | undefined {
+    return undefined;
+  }
+  getMappingByBrowserId(_browserId: string): Mapping | undefined {
+    return undefined;
+  }
+  upsert(_mapping: Mapping): void {}
 }

@@ -21,9 +21,23 @@ import { extractMoveToken, removeMoveToken, isDescendantOf } from "./moves";
 import { resolveConflict } from "./conflict";
 import { createLogger } from "../utils";
 import { generateOrderHash, getTokenInfo } from "./item-order-token";
-import { MappingCache } from "./mapping-cache";
 
 const logger = createLogger("LWSync collections");
+
+/**
+ * Simple mapping map interface for dependency injection
+ * Matches the inline MappingMap class in engine.ts
+ */
+export interface MappingMap {
+  size: number;
+  load(): Promise<void>;
+  getMappingByLinkwardenId(
+    id: number,
+    type: "link" | "collection"
+  ): Mapping | undefined;
+  getMappingByBrowserId(browserId: string): Mapping | undefined;
+  upsert(mapping: Mapping): void;
+}
 
 export interface CollectionCaches {
   collections: Map<number, LinkwardenCollection>;
@@ -33,27 +47,51 @@ export interface CollectionCaches {
 export interface CollectionSyncDeps {
   api: LinkwardenAPI;
   errorReporter?: SyncErrorReporter;
-  cache?: MappingCache;
+  cache?: MappingMap;
+}
+
+/**
+ * Mock MappingMap for backward compatibility when no cache is provided
+ */
+class MappingMapMock implements MappingMap {
+  get size(): number {
+    return 0;
+  }
+
+  async load(): Promise<void> {}
+
+  getMappingByLinkwardenId(
+    _id: number,
+    _type: "link" | "collection"
+  ): Mapping | undefined {
+    return undefined;
+  }
+
+  getMappingByBrowserId(_browserId: string): Mapping | undefined {
+    return undefined;
+  }
+
+  upsert(_mapping: Mapping): void {}
 }
 
 export class CollectionSync {
   private api: LinkwardenAPI;
   private errors: SyncErrorReporter;
-  private cache: MappingCache;
+  private cache: MappingMap;
 
   constructor(
     apiOrDeps: LinkwardenAPI | CollectionSyncDeps,
     errorReporter?: SyncErrorReporter,
-    cache?: MappingCache
+    cache?: MappingMap
   ) {
     if (apiOrDeps instanceof Object && "api" in apiOrDeps) {
       this.api = apiOrDeps.api;
       this.errors = apiOrDeps.errorReporter || new SyncErrorReporter();
-      this.cache = apiOrDeps.cache || cache || new MappingCache();
+      this.cache = apiOrDeps.cache || cache || new MappingMapMock();
     } else {
       this.api = apiOrDeps;
       this.errors = errorReporter || new SyncErrorReporter();
-      this.cache = cache || new MappingCache();
+      this.cache = cache || new MappingMapMock();
     }
   }
 

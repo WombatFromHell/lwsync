@@ -18,8 +18,8 @@ import {
   CollectionCaches,
   buildCollectionsCache,
   buildBookmarksCache,
+  type MappingMap,
 } from "./collections";
-import { MappingCache } from "./mapping-cache";
 import { createLogger } from "../utils";
 
 const logger = createLogger("LWSync remote-sync");
@@ -32,7 +32,7 @@ export class RemoteSync {
   constructor(
     api: LinkwardenAPI,
     errorReporter?: SyncErrorReporter,
-    cache?: MappingCache
+    cache?: MappingMap
   ) {
     this.api = api;
     this.errors = errorReporter || new SyncErrorReporter();

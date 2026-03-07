@@ -19,7 +19,6 @@ export type { CollectionSyncDeps, CollectionCaches } from "./collections";
 export { SyncInitializer } from "./initialization";
 export { OrphanCleanup } from "./orphans";
 export { SyncComparator } from "./comparator";
-export { MappingCache } from "./mapping-cache";
 
 // Utilities
 export { SyncErrorReporter, createErrorContext } from "./errorReporter";

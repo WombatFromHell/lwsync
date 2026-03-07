@@ -14,23 +14,23 @@ import { computeChecksum } from "./conflict";
 import { appendMoveToken, isDescendantOf } from "./moves";
 import { createLogger } from "../utils";
 import { generateOrderHash, appendOrderToken } from "./item-order-token";
-import { MappingCache } from "./mapping-cache";
+import type { MappingMap } from "./collections";
 
 const logger = createLogger("LWSync browser-changes");
 
 export class BrowserChangeApplier {
   private api: LinkwardenAPI;
   private errors: SyncErrorReporter;
-  private cache: MappingCache;
+  private cache: MappingMap;
 
   constructor(
     api: LinkwardenAPI,
     errorReporter?: SyncErrorReporter,
-    cache?: MappingCache
+    cache?: MappingMap
   ) {
     this.api = api;
     this.errors = errorReporter || new SyncErrorReporter();
-    this.cache = cache || new MappingCache();
+    this.cache = cache || new MappingMapMock();
   }
 
   /**
@@ -602,6 +602,26 @@ export interface LinkMove {
   linkId: number;
   toCollectionId: number;
   browserId?: string; // Optional: for logging
+}
+
+/**
+ * Mock MappingMap for backward compatibility
+ */
+class MappingMapMock implements MappingMap {
+  get size(): number {
+    return 0;
+  }
+  async load(): Promise<void> {}
+  getMappingByLinkwardenId(
+    _id: number,
+    _type: "link" | "collection"
+  ): Mapping | undefined {
+    return undefined;
+  }
+  getMappingByBrowserId(_browserId: string): Mapping | undefined {
+    return undefined;
+  }
+  upsert(_mapping: Mapping): void {}
 }
 
 export class BatchOperations {
