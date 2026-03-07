@@ -15,9 +15,11 @@ export type { BatchResult, LinkMove } from "./browser-changes";
 export { BatchOperations, createBatchOperations } from "./browser-changes";
 export { RemoteSync } from "./remote-sync";
 export { CollectionSync } from "./collections";
+export type { CollectionSyncDeps, CollectionCaches } from "./collections";
 export { SyncInitializer } from "./initialization";
 export { OrphanCleanup } from "./orphans";
 export { SyncComparator } from "./comparator";
+export { MappingCache } from "./mapping-cache";
 
 // Utilities
 export { SyncErrorReporter, createErrorContext } from "./errorReporter";
@@ -36,15 +38,13 @@ export {
 } from "./moves";
 export type { MoveToken } from "../types/sync";
 
-// Mapping and cache operations
+// Path and cache utilities (re-export from collections.ts)
 export {
   buildPath,
-  buildBrowserPath,
-  findFolderByPath,
   findOrCreateNestedFolder,
   buildCollectionsCache,
   buildBookmarksCache,
-} from "./mappings";
+} from "./collections";
 
 // Path utilities (re-export for tests)
 export { parseFolderPath } from "../utils";

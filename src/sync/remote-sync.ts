@@ -13,8 +13,13 @@ import * as bookmarks from "../bookmarks";
 import type { SyncStatsObject } from "./engine";
 import { SyncStats } from "./engine";
 import { SyncErrorReporter, createErrorContext } from "./errorReporter";
-import { CollectionSync, CollectionCaches } from "./collections";
-import { buildCollectionsCache, buildBookmarksCache } from "./mappings";
+import {
+  CollectionSync,
+  CollectionCaches,
+  buildCollectionsCache,
+  buildBookmarksCache,
+} from "./collections";
+import { MappingCache } from "./mapping-cache";
 import { createLogger } from "../utils";
 
 const logger = createLogger("LWSync remote-sync");
@@ -24,10 +29,14 @@ export class RemoteSync {
   private errors: SyncErrorReporter;
   private collectionSync: CollectionSync;
 
-  constructor(api: LinkwardenAPI, errorReporter?: SyncErrorReporter) {
+  constructor(
+    api: LinkwardenAPI,
+    errorReporter?: SyncErrorReporter,
+    cache?: MappingCache
+  ) {
     this.api = api;
     this.errors = errorReporter || new SyncErrorReporter();
-    this.collectionSync = new CollectionSync(this.api, this.errors);
+    this.collectionSync = new CollectionSync(this.api, this.errors, cache);
   }
 
   /**

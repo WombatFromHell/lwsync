@@ -11,14 +11,17 @@ import * as bookmarks from "../bookmarks";
 import { SyncErrorReporter, createErrorContext } from "./errorReporter";
 import type { Mapping } from "../types/storage";
 import { createLogger } from "../utils";
+import { MappingCache } from "./mapping-cache";
 
 const logger = createLogger("LWSync orphans");
 
 export class OrphanCleanup {
   private errors: SyncErrorReporter;
+  private cache: MappingCache;
 
-  constructor(errorReporter?: SyncErrorReporter) {
+  constructor(errorReporter?: SyncErrorReporter, cache?: MappingCache) {
     this.errors = errorReporter || new SyncErrorReporter();
+    this.cache = cache || new MappingCache();
   }
 
   /**
@@ -80,6 +83,7 @@ export class OrphanCleanup {
     remoteIds: Set<number>,
     type: "link" | "collection"
   ): Promise<Mapping[]> {
+    // Use storage directly to get current mappings (cache may be stale)
     const allMappings = await storage.getMappings();
     return allMappings.filter(
       (m) => m.linkwardenType === type && !remoteIds.has(m.linkwardenId)
@@ -183,6 +187,7 @@ export class OrphanCleanup {
    */
   async normalizeIndices(browserRootFolderId: string): Promise<void> {
     try {
+      // Use storage directly to get current mappings (cache may be stale)
       const allMappings = await storage.getMappings();
 
       // Group mappings by parent folder

@@ -3,5 +3,5 @@
  */
 
 export * from "./generators";
-export * from "./cleanup";
+export * from "./test-cleanup";
 export * from "./config";

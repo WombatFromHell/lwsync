@@ -14,7 +14,7 @@ import * as bookmarks from "../bookmarks";
 import { SyncErrorReporter, createErrorContext } from "./errorReporter";
 import { RemoteSync } from "./remote-sync";
 import { parseFolderPath as parsePath } from "../utils";
-import { findOrCreateNestedFolder } from "./mappings";
+import { findOrCreateNestedFolder } from "./collections";
 import { createLogger } from "../utils";
 
 const logger = createLogger("LWSync initialization");

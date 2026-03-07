@@ -560,6 +560,7 @@ describe("E2E Tests: Bookmark Creation Flow (Real API)", () => {
           );
         });
       console.log("Created bookmark with title:", originalTitle);
+      console.log("Created bookmark ID:", browserBookmark.id);
 
       // Quickly rename before sync (simulates user typing)
       await new Promise((resolve) => setTimeout(resolve, 100));

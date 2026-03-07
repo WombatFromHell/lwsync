@@ -28,7 +28,8 @@ import type {
 import { SyncErrorReporter, createErrorContext } from "./errorReporter";
 import { computeChecksum, generateId, now } from "../utils";
 import { createLogger } from "../utils";
-import { buildPath } from "./mappings";
+import { buildPath } from "./collections";
+import { MappingCache } from "./mapping-cache";
 
 const logger = createLogger("LWSync comparator");
 
@@ -52,10 +53,16 @@ interface LinkWithMetadata {
 export class SyncComparator {
   private api: LinkwardenAPI;
   private errors: SyncErrorReporter;
+  private cache: MappingCache;
 
-  constructor(api: LinkwardenAPI, errorReporter?: SyncErrorReporter) {
+  constructor(
+    api: LinkwardenAPI,
+    errorReporter?: SyncErrorReporter,
+    cache?: MappingCache
+  ) {
     this.api = api;
     this.errors = errorReporter || new SyncErrorReporter();
+    this.cache = cache || new MappingCache();
   }
 
   /**
@@ -708,9 +715,7 @@ export class SyncComparator {
         result.scanned++;
 
         // Check if already mapped
-        const existingMapping = await storage.getMappingByBrowserId(
-          bookmark.id
-        );
+        const existingMapping = this.cache.getMappingByBrowserId(bookmark.id);
         if (existingMapping) {
           result.skipped++;
           continue;
@@ -739,6 +744,7 @@ export class SyncComparator {
             }),
           };
           await storage.upsertMapping(mapping);
+          this.cache.upsert(mapping);
           result.skipped++;
           continue;
         }

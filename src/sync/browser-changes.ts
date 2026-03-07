@@ -14,16 +14,23 @@ import { computeChecksum } from "./conflict";
 import { appendMoveToken, isDescendantOf } from "./moves";
 import { createLogger } from "../utils";
 import { generateOrderHash, appendOrderToken } from "./item-order-token";
+import { MappingCache } from "./mapping-cache";
 
 const logger = createLogger("LWSync browser-changes");
 
 export class BrowserChangeApplier {
   private api: LinkwardenAPI;
   private errors: SyncErrorReporter;
+  private cache: MappingCache;
 
-  constructor(api: LinkwardenAPI, errorReporter?: SyncErrorReporter) {
+  constructor(
+    api: LinkwardenAPI,
+    errorReporter?: SyncErrorReporter,
+    cache?: MappingCache
+  ) {
     this.api = api;
     this.errors = errorReporter || new SyncErrorReporter();
+    this.cache = cache || new MappingCache();
   }
 
   /**
@@ -70,7 +77,7 @@ export class BrowserChangeApplier {
   ): Promise<void> {
     // Check if we have a link mapping (for renames where URL might not be provided)
     if (change.linkwardenId) {
-      const linkMapping = await storage.getMappingByLinkwardenId(
+      const linkMapping = this.cache.getMappingByLinkwardenId(
         change.linkwardenId,
         "link"
       );
@@ -210,7 +217,7 @@ export class BrowserChangeApplier {
    * Handle folder name update
    */
   private async handleFolderUpdate(change: PendingChange): Promise<void> {
-    const mapping = await storage.getMappingByLinkwardenId(
+    const mapping = this.cache.getMappingByLinkwardenId(
       change.linkwardenId!,
       "collection"
     );
@@ -251,7 +258,7 @@ export class BrowserChangeApplier {
     }
 
     // Find mapping for the moved item
-    const itemMapping = await storage.getMappingByBrowserId(change.browserId!);
+    const itemMapping = this.cache.getMappingByBrowserId(change.browserId!);
 
     if (!itemMapping) {
       logger.warn("No mapping found for moved item:", {
@@ -311,7 +318,7 @@ export class BrowserChangeApplier {
     }
 
     // It's a move to different parent - need to verify parent is a synced collection
-    const parentMapping = await storage.getMappingByBrowserId(
+    const parentMapping = this.cache.getMappingByBrowserId(
       change.parentId as string
     );
 
@@ -374,7 +381,7 @@ export class BrowserChangeApplier {
     change: PendingChange,
     parentMapping: Mapping
   ): Promise<void> {
-    const folderMapping = await storage.getMappingByLinkwardenId(
+    const folderMapping = this.cache.getMappingByLinkwardenId(
       change.linkwardenId!,
       "collection"
     );
@@ -454,13 +461,11 @@ export class BrowserChangeApplier {
       if (!change.linkwardenId || !change.parentId) continue;
 
       // Find mapping for the moved item
-      const itemMapping = await storage.getMappingByBrowserId(
-        change.browserId!
-      );
+      const itemMapping = this.cache.getMappingByBrowserId(change.browserId!);
       if (!itemMapping || itemMapping.linkwardenType !== "link") continue;
 
       // Find mapping for the target parent
-      const parentMapping = await storage.getMappingByBrowserId(
+      const parentMapping = this.cache.getMappingByBrowserId(
         change.parentId as string
       );
       if (!parentMapping || parentMapping.linkwardenType !== "collection")
@@ -558,10 +563,11 @@ export class BrowserChangeApplier {
     try {
       const children = await bookmarks.getChildren(parentBrowserId);
       for (const child of children) {
-        const mapping = await storage.getMappingByBrowserId(child.id);
+        const mapping = this.cache.getMappingByBrowserId(child.id);
         if (mapping) {
           mapping.browserIndex = child.index;
           await storage.upsertMapping(mapping);
+          this.cache.upsert(mapping);
         }
       }
       logger.debug("Captured sibling indices:", {

@@ -17,8 +17,8 @@ export interface MockBookmarkNode {
 }
 
 interface ChangeInfo {
-  title?: { newValue?: string };
-  url?: { newValue?: string };
+  title?: string;
+  url?: string;
 }
 
 interface RemoveInfo {
@@ -216,10 +216,10 @@ export class MockBookmarks {
     const now = Date.now();
 
     if (changes.title !== undefined) {
-      node.title = changes.title.newValue ?? "";
+      node.title = changes.title;
     }
     if (changes.url !== undefined) {
-      node.url = changes.url.newValue ?? "";
+      node.url = changes.url;
     }
 
     node.dateGroupModified = now;

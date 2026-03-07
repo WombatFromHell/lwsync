@@ -24,10 +24,10 @@ Comprehensive test suite for Linkwarden sync extension using Bun test runner.
 ```bash
 bun test                                    # All tests (122 tests, ~30s)
 bun test tests/sync.test.ts                 # Unit: pure functions (28 tests, ~1s)
-bun test tests/storage.test.ts              # Unit: storage wrapper (21 tests, ~1s)
 bun test tests/item-order-token.test.ts     # Unit: order tokens (32 tests, ~1s)
 bun test tests/smoke.test.ts                # E2E: basic scenarios (~10s)
 bun test tests/e2e-advanced.test.ts         # E2E: advanced scenarios (~15s)
+bun test tests/performance/                 # Performance tests (13 tests, ~5s)
 ```
 
 **Test Configuration:**
@@ -85,7 +85,7 @@ E2E tests use environment variables from `.env`:
 
 ```
 tests/
-├── fixtures/                 # Test data factories
+├── fixtures/                 # Test data factories (8 files)
 │   ├── index.ts              # Barrel exports
 │   ├── mapping.ts            # createMapping(), createCollectionMapping()
 │   ├── metadata.ts           # createSyncMetadata()
@@ -94,27 +94,27 @@ tests/
 │   ├── link.ts               # createLink(), createLinkWithDetails()
 │   ├── bookmark.ts           # createBookmark(), createBookmarkFolder()
 │   └── comparison.ts         # createSyncComparison()
-├── mocks/                    # Mock implementations
+├── mocks/                    # Mock implementations (5 files)
 │   ├── index.ts              # Barrel exports
 │   ├── storage.ts            # MockStorage (in-memory chrome.storage)
 │   ├── bookmarks.ts          # MockBookmarks (in-memory tree)
 │   ├── browser.ts            # setupBrowserMocks(), cleanupBrowserMocks()
 │   └── linkwarden.ts         # MockLinkwardenAPI (in-memory API)
-├── utils/                    # Test utilities
+├── utils/                    # Test utilities (4 files)
 │   ├── index.ts              # Barrel exports
 │   ├── generators.ts         # uniqueId(), uniqueUrl(), timestamp()
 │   ├── test-cleanup.ts       # cleanupServerResources(), enhancedCleanup()
-│   ├── config.ts             # getTestCollectionId()
-│   └── harness.ts            # Test harness utilities
+│   └── config.ts             # getTestCollectionId()
 ├── sync.test.ts              # Unit: sync functions (28 tests)
 ├── item-order-token.test.ts  # Unit: order tokens (32 tests)
 ├── smoke.test.ts             # E2E: basic scenarios (~10s)
 ├── e2e-advanced.test.ts      # E2E: advanced scenarios (~15s)
 └── performance/              # Performance tests
-    └── parallel.test.ts      # Parallel operations (~5s)
+    ├── parallel.test.ts      # Parallel operations (~5s)
+    └── caching.test.ts       # Caching & batch operations (~5s)
 ```
 
-**Note:** `storage.test.ts` was removed/migrated. Storage functionality is tested through integration tests and E2E tests.
+**Note:** Storage functionality is tested through integration tests embedded in E2E files and through performance tests.
 
 ### 3.1 Test Distribution
 
@@ -128,29 +128,27 @@ tests/
 │  │   (60 tests)       │  │   (62 tests)                   │  │
 │  │   ~3 seconds       │  │   ~27 seconds                  │  │
 │  ├────────────────────┤  ├────────────────────────────────┤  │
-│  │ sync.test.ts       │  │ sync.integration.test.ts       │  │
-│  │ • Checksums (5)    │  │ • Full sync engine (62)        │  │
-│  │ • Conflicts (6)    │  │ • Browser ↔ Server sync        │  │
-│  │ • Move tokens (15) │  │ • Mocked APIs                  │  │
+│  │ sync.test.ts       │  │ smoke.test.ts                  │  │
+│  │ • Checksums (5)    │  │ • Basic sync flows             │  │
+│  │ • Conflicts (6)    │  │ • Search index lag handling    │  │
+│  │ • Move tokens (15) │  │ • Orphan cleanup               │  │
 │  │ • Path parsing (2) │  │                                │  │
-│  │                    │  │ smoke.test.ts                  │  │
-│  │ item-order-token   │  │ • Basic sync flows             │  │
-│  │ • Hash gen (6)     │  │ • Search index lag handling    │  │
-│  │ • Token format (7) │  │ • Orphan cleanup               │  │
-│  │ • Token parse (7)  │  │                                │  │
-│  │ • Token utils (12) │  │ e2e-advanced.test.ts           │  │
-│  │                    │  │ • Conflict resolution (LWW)    │  │
-│  │ performance/       │  │ • Order preservation           │  │
-│  │ • Parallel ops     │  │ • Subcollection sync           │  │
+│  │                    │  │ e2e-advanced.test.ts           │  │
+│  │ item-order-token   │  │ • Conflict resolution (LWW)    │  │
+│  │ • Hash gen (6)     │  │ • Order preservation           │  │
+│  │ • Token format (7) │  │ • Subcollection sync           │  │
+│  │ • Token parse (7)  │  │ • Bulk operations              │  │
+│  │ • Token utils (12) │  │                                │  │
+│  │                    │  │ performance/                   │  │
+│  │ performance/       │  │ • Parallel operations          │  │
+│  │ • Parallel ops     │  │ • Caching & batch ops          │  │
 │  │                    │  │                                │  │
-│  │                    │  │ performance/parallel.test.ts   │  │
-│  │                    │  │ • Parallel sync operations     │  │
 │  └────────────────────┘  └────────────────────────────────┘  │
 │                                                               │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Note:** Test counts are approximate. Run `bun test` for exact counts. The test suite includes unit tests, integration tests, E2E tests, and performance tests.
+**Note:** Test counts are approximate. Run `bun test` for exact counts. The test suite includes unit tests, integration tests, E2E tests, and performance tests. Integration tests are embedded within E2E test files (smoke.test.ts and e2e-advanced.test.ts) rather than in a separate file.
 
 ---
 
@@ -540,16 +538,17 @@ bun test                            # All tests (~30s)
 
 ## 10. Summary
 
-| Metric                | Value    |
-| --------------------- | -------- |
-| **Total Tests**       | 122      |
-| **Unit Tests**        | 60 (49%) |
-| **Integration Tests** | 62       |
-| **E2E Tests**         | 18       |
-| **Performance Tests** | 13       |
-| **Pass Rate**         | 100%     |
-| **Runtime**           | ~30s     |
-| **Test Files**        | 6        |
+| Metric                   | Value           |
+| ------------------------ | --------------- |
+| **Total Tests**          | 122             |
+| **Unit Tests**           | 60 (49%)        |
+| **Integration Tests**    | Embedded in E2E |
+| **E2E Tests**            | 18              |
+| **Performance Tests**    | 13              |
+| **Pass Rate**            | 100%            |
+| **Runtime**              | ~30s            |
+| **Test Files**           | 6               |
+| **Infrastructure Files** | 17              |
 
 **Key Strengths:**
 
@@ -569,9 +568,9 @@ bun test                            # All tests (~30s)
 | `smoke.test.ts`                | 10    | E2E         | ~10s    |
 | `e2e-advanced.test.ts`         | 8     | E2E         | ~15s    |
 | `performance/parallel.test.ts` | 13    | Performance | ~5s     |
-| `sync.integration.test.ts`     | 62    | Integration | ~5s     |
+| `performance/caching.test.ts`  | 13    | Performance | ~5s     |
 
-**Note:** Integration tests are run as part of the smoke and E2E test files.
+**Note:** Integration tests are embedded within the smoke.test.ts and e2e-advanced.test.ts files, using mocked browser APIs with real or mocked Linkwarden API depending on the test section.
 
 ---
 

@@ -21,6 +21,7 @@ import { RemoteSync } from "./remote-sync";
 import { SyncInitializer } from "./initialization";
 import { OrphanCleanup } from "./orphans";
 import { SyncComparator } from "./comparator";
+import { MappingCache } from "./mapping-cache";
 import { createLogger } from "../utils";
 
 const logger = createLogger("LWSync engine");
@@ -69,6 +70,7 @@ export class SyncEngine {
   private api: LinkwardenAPI;
   private isSyncing = false;
   private errors: SyncErrorReporter;
+  private mappingCache: MappingCache;
 
   // Module instances
   private browserChanges: BrowserChangeApplier;
@@ -80,13 +82,22 @@ export class SyncEngine {
   constructor(api: LinkwardenAPI) {
     this.api = api;
     this.errors = new SyncErrorReporter();
+    this.mappingCache = new MappingCache();
 
-    // Initialize module instances
-    this.browserChanges = new BrowserChangeApplier(this.api, this.errors);
-    this.remoteSync = new RemoteSync(this.api, this.errors);
+    // Initialize module instances with cache
+    this.browserChanges = new BrowserChangeApplier(
+      this.api,
+      this.errors,
+      this.mappingCache
+    );
+    this.remoteSync = new RemoteSync(this.api, this.errors, this.mappingCache);
     this.initializer = new SyncInitializer(this.api, this.errors);
-    this.orphans = new OrphanCleanup(this.errors);
-    this.comparator = new SyncComparator(this.api, this.errors);
+    this.orphans = new OrphanCleanup(this.errors, this.mappingCache);
+    this.comparator = new SyncComparator(
+      this.api,
+      this.errors,
+      this.mappingCache
+    );
   }
 
   /**
@@ -136,6 +147,10 @@ export class SyncEngine {
     this.isSyncing = true;
 
     try {
+      // Load mapping cache once at start of sync
+      await this.mappingCache.load();
+      logger.info("Loaded mapping cache:", { count: this.mappingCache.size });
+
       logger.info("Starting sync:", {
         targetCollectionId: metadata.targetCollectionId,
         browserRootFolderId: metadata.browserRootFolderId,
@@ -243,7 +258,9 @@ export class SyncEngine {
         change.linkwardenId !== undefined
       ) {
         // Check if it's a link (not a folder)
-        const mapping = await storage.getMappingByBrowserId(change.browserId!);
+        const mapping = this.mappingCache.getMappingByBrowserId(
+          change.browserId!
+        );
         if (mapping?.linkwardenType === "link") {
           // Only batch moves to different collections, not reorders within same folder
           const isReorder = change.oldParentId === change.parentId;
@@ -260,7 +277,9 @@ export class SyncEngine {
         change.source === "browser" &&
         change.linkwardenId !== undefined
       ) {
-        const mapping = await storage.getMappingByBrowserId(change.browserId!);
+        const mapping = this.mappingCache.getMappingByBrowserId(
+          change.browserId!
+        );
         if (mapping?.linkwardenType === "link") {
           linkDeletes.push(change);
           continue;

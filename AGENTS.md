@@ -32,6 +32,7 @@ bun test tests/sync.test.ts           # Unit tests: pure functions (28 tests)
 bun test tests/item-order-token.test.ts # Unit tests: order tokens (32 tests)
 bun test tests/smoke.test.ts          # E2E tests: real Linkwarden API (~10s)
 bun test tests/e2e-advanced.test.ts   # E2E tests: advanced scenarios (~15s)
+bun test tests/performance/           # Performance tests (13 tests)
 ```
 
 ### Packaging
@@ -78,7 +79,7 @@ tests/
 | `tests/smoke.test.ts` | 10 | E2E tests with real Linkwarden API |
 | `tests/e2e-advanced.test.ts` | 8 | Advanced E2E scenarios (conflicts, order preservation) |
 | `tests/performance/parallel.test.ts` | 13 | Parallel operation performance |
-| `tests/sync.integration.test.ts` | 62 | Full sync engine with mocked APIs |
+| `tests/performance/caching.test.ts` | 13 | Caching and batch operations performance |
 
 **Test Infrastructure:**
 - **Factories** (`tests/fixtures/`): `createMapping()`, `createLink()`, `createCollection()`, etc.
@@ -114,6 +115,8 @@ test("should create mapping", async () => {
 ```
 
 **Rule:** Never mock the system-under-test. Only mock browser APIs that don't exist in test environment.
+
+**Note:** Integration tests are embedded within the E2E test files (`smoke.test.ts` and `e2e-advanced.test.ts`) rather than in a separate file. These tests use mocked browser APIs with either real or mocked Linkwarden API depending on the test section.
 
 ## Loading the Extension
 
