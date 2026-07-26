@@ -94,21 +94,38 @@ export async function move(
 export async function getOtherBookmarksFolder(): Promise<
   BookmarkNode | undefined
 > {
+  return findTopLevelFolder("Other Bookmarks");
+}
+
+/**
+ * Find a top-level bookmark folder by name (case-insensitive).
+ * Top-level folders are direct children of the bookmark tree root
+ * (e.g., "Bookmarks Bar", "Other Bookmarks", "Mobile Bookmarks").
+ */
+export async function findTopLevelFolder(
+  name: string
+): Promise<BookmarkNode | undefined> {
   const tree = await getTree();
   if (tree.length === 0) return undefined;
 
   const root = tree[0];
-  // The root contains special folders as children
-  if (root.children) {
-    // Look for "Other Bookmarks" folder (Chrome) or "Bookmarks Toolbar" (Firefox)
-    return root.children.find(
-      (child) =>
-        child.title === "Other Bookmarks" ||
-        child.title === "Bookmarks Toolbar" ||
-        child.id === "2"
-    );
-  }
-  return undefined;
+  if (!root.children) return undefined;
+
+  const lower = name.toLowerCase();
+  return root.children.find(
+    (child) => (child.title ?? "").toLowerCase() === lower && !child.url
+  );
+}
+
+/**
+ * Get the default root folder name for the current browser.
+ * Chrome/Edge: "Bookmarks Bar"
+ * Firefox: "Bookmarks Toolbar"
+ */
+export function getDefaultRootFolderName(): string {
+  const browser = detectBrowser();
+  if (browser === "firefox") return "Bookmarks Toolbar";
+  return "Bookmarks Bar";
 }
 
 /**
@@ -127,16 +144,50 @@ export function getBrowserRootFolderId(): string {
 }
 
 /**
- * Get the default browser root folder name
+ * Resolve the root bookmark folder with fallback chain.
+ * Tries: requestedId → folderName → Bookmarks Bar → Other Bookmarks → creates new.
  */
-export function getDefaultBrowserRootFolderName(): string {
-  const browser = detectBrowser();
-
-  if (browser === "firefox") {
-    return "Bookmarks Toolbar";
+export async function resolveRootFolder(
+  requestedId: string,
+  folderName?: string
+): Promise<BookmarkNode> {
+  // Try the requested ID first (get() throws on invalid IDs)
+  try {
+    const requested = await get(requestedId);
+    if (requested) return requested;
+  } catch {
+    // ponytail: swallow — fall through to fallback
   }
 
-  return "Bookmarks";
+  // Try folder by name (e.g., "Bookmarks Bar", "Other Bookmarks")
+  if (folderName) {
+    try {
+      const named = await findTopLevelFolder(folderName);
+      if (named) return named;
+    } catch {
+      // ponytail: swallow — fall through to fallback
+    }
+  }
+
+  // Fallback: Bookmarks Bar (Chrome "1") / Bookmarks Toolbar (Firefox)
+  try {
+    const browserDefault = await get(getBrowserRootFolderId());
+    if (browserDefault) return browserDefault;
+  } catch {
+    // ponytail: swallow — fall through to next fallback
+  }
+
+  // Fallback: "Other Bookmarks" (Chrome "2")
+  const fallback = await getOtherBookmarksFolder();
+  if (fallback) return fallback;
+
+  // Last resort: create a new root folder under the first top-level folder
+  const tree = await getTree();
+  const rootNode = tree[0];
+  const parentId = rootNode.children?.[0]?.id || rootNode.id;
+  const node = await create({ parentId, title: "LWSync Root" });
+
+  return node;
 }
 
 /**

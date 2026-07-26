@@ -3,7 +3,7 @@
   "name": "LWSync",
   "version": "1.0.0",
   "description": "Bidirectional sync between Linkwarden and browser bookmarks",
-  "permissions": ["bookmarks", "storage", "unlimitedStorage", "alarms"],
+  "permissions": ["bookmarks", "storage", "unlimitedStorage", "alarms", "declarativeNetRequest"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

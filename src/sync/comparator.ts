@@ -801,4 +801,8 @@ class MappingMapMock implements MappingMap {
     return undefined;
   }
   upsert(_mapping: Mapping): void {}
+
+  delete(_linkwardenId: number, _type: "link" | "collection"): boolean {
+    return false;
+  }
 }

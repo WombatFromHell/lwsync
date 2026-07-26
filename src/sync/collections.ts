@@ -12,7 +12,7 @@ import * as storage from "../storage";
 import * as bookmarks from "../bookmarks";
 import { LinkwardenAPI } from "../api";
 import type { LinkwardenCollection } from "../types/api";
-import type { Mapping } from "../types/storage";
+import type { Mapping, SyncPreference } from "../types/storage";
 import type { BookmarkNode } from "../types/bookmarks";
 import type { SyncStatsObject } from "./engine";
 import type { SyncStats } from "./engine";
@@ -37,6 +37,7 @@ export interface MappingMap {
   ): Mapping | undefined;
   getMappingByBrowserId(browserId: string): Mapping | undefined;
   upsert(mapping: Mapping): void;
+  delete(linkwardenId: number, type: "link" | "collection"): boolean;
 }
 
 export interface CollectionCaches {
@@ -72,12 +73,18 @@ class MappingMapMock implements MappingMap {
   }
 
   upsert(_mapping: Mapping): void {}
+
+  delete(_linkwardenId: number, _type: "link" | "collection"): boolean {
+    return false;
+  }
 }
 
 export class CollectionSync {
   private api: LinkwardenAPI;
   private errors: SyncErrorReporter;
   private cache: MappingMap;
+  /** Set by RemoteSync before each sync cycle; defaults to "prefer-remote". */
+  syncPreference: SyncPreference = "prefer-remote";
 
   constructor(
     apiOrDeps: LinkwardenAPI | CollectionSyncDeps,
@@ -339,7 +346,13 @@ export class CollectionSync {
 
     // Check for server-side folder move (parentId changed without move token)
     if (collection.parentId !== undefined && !moveTokenProcessed) {
-      const currentNode = await bookmarks.get(existing.browserId);
+      let currentNode: BookmarkNode | undefined;
+      try {
+        currentNode = await bookmarks.get(existing.browserId);
+      } catch {
+        // Folder deleted externally — skip move check
+        currentNode = undefined;
+      }
       const actualBrowserParentId = currentNode?.parentId;
 
       const currentParentMapping = this.cache.getMappingByLinkwardenId(
@@ -430,45 +443,62 @@ export class CollectionSync {
   ): Promise<void> {
     try {
       const existing = this.cache.getMappingByLinkwardenId(link.id, "link");
+      let needsCreate = !existing;
 
       if (existing) {
-        // Check for updates
-        const remoteUpdatedAt = new Date(link.updatedAt).getTime();
-        if (remoteUpdatedAt > existing.browserUpdatedAt) {
-          await bookmarks.update(existing.browserId, {
-            title: link.name,
-            url: link.url,
+        // Verify bookmark still exists — mapping may be stale (deleted externally)
+        // bookmarks.get() throws when the ID doesn't exist in Chrome's bookmark tree
+        let currentNode: BookmarkNode | undefined;
+        try {
+          currentNode = await bookmarks.get(existing.browserId);
+        } catch {
+          currentNode = undefined;
+        }
+        if (!currentNode) {
+          logger.info("Stale mapping, cleaning up:", {
+            linkId: link.id,
+            browserId: existing.browserId,
           });
-          existing.browserUpdatedAt = Date.now();
-          existing.lastSyncedAt = Date.now();
-        }
-        // Update cached name/hash for order token
-        existing.cachedName = link.name;
-        existing.cachedNameHash = generateOrderHash(link.name);
-
-        // CRITICAL: Always capture current browser index (source of truth)
-        const currentNode = await bookmarks.get(existing.browserId);
-        if (currentNode && currentNode.index !== undefined) {
-          existing.browserIndex = currentNode.index;
-        } else if (link.description && existing.browserIndex === undefined) {
-          // FALLBACK: Browser index unavailable - use server token
-          // This handles edge cases like corrupted mappings or import scenarios
-          const tokenInfo = getTokenInfo(link.description, link.name);
-          if (tokenInfo?.hasToken && tokenInfo.index !== undefined) {
-            existing.browserIndex = tokenInfo.index;
-            logger.debug(
-              "Using server order token as fallback (browser index unavailable):",
-              {
-                linkId: link.id,
-                index: tokenInfo.index,
-              }
-            );
+          await storage.removeMapping(link.id, "link");
+          this.cache.delete(link.id, "link");
+          needsCreate = true;
+        } else {
+          // Check for updates using conflict resolution (checksum + timestamp)
+          const result = resolveConflict(existing, link, this.syncPreference);
+          if (result === "use-remote") {
+            await bookmarks.update(existing.browserId, {
+              title: link.name,
+              url: link.url,
+            });
+            existing.browserUpdatedAt = Date.now();
+            existing.checksum = computeChecksum(link);
+            existing.lastSyncedAt = Date.now();
           }
-        }
+          // Update cached name/hash for order token
+          existing.cachedName = link.name;
+          existing.cachedNameHash = generateOrderHash(link.name);
 
-        await storage.upsertMapping(existing);
-        stats.increment("updated");
-      } else {
+          // CRITICAL: Always capture current browser index (source of truth)
+          if (currentNode.index !== undefined) {
+            existing.browserIndex = currentNode.index;
+          } else if (link.description && existing.browserIndex === undefined) {
+            // FALLBACK: Browser index unavailable - use server token
+            const tokenInfo = getTokenInfo(link.description, link.name);
+            if (tokenInfo?.hasToken && tokenInfo.index !== undefined) {
+              existing.browserIndex = tokenInfo.index;
+              logger.debug(
+                "Using server order token as fallback (browser index unavailable):",
+                { linkId: link.id, index: tokenInfo.index }
+              );
+            }
+          }
+
+          await storage.upsertMapping(existing);
+          stats.increment("updated");
+        }
+      }
+
+      if (needsCreate) {
         // Check if bookmark already exists
         const existingBookmarks = await bookmarks.search(link.url);
         const matchingBookmark = existingBookmarks.find(
@@ -477,15 +507,11 @@ export class CollectionSync {
 
         if (matchingBookmark) {
           // Create mapping for existing bookmark
-          // Browser index is source of truth - capture it
-          // BUT: If server has order token, use it as initial order (fresh sync scenario)
           let browserIndex = matchingBookmark.index;
 
           if (link.description) {
             const tokenInfo = getTokenInfo(link.description, link.name);
             if (tokenInfo?.hasToken && tokenInfo.index !== undefined) {
-              // Server has order token - use it for initial ordering
-              // This ensures consistent order across devices when bookmark exists locally
               browserIndex = tokenInfo.index;
               logger.debug("Using server order token for existing bookmark:", {
                 linkId: link.id,
@@ -520,15 +546,11 @@ export class CollectionSync {
             url: link.url,
           });
 
-          // Browser index is source of truth - capture it
-          // BUT: If server has order token, use it as initial order (fresh sync scenario)
           let browserIndex = node.index;
 
           if (link.description) {
             const tokenInfo = getTokenInfo(link.description, link.name);
             if (tokenInfo?.hasToken && tokenInfo.index !== undefined) {
-              // Server has order token - use it for initial ordering
-              // This ensures consistent order across devices on first sync
               browserIndex = tokenInfo.index;
               logger.debug("Using server order token for initial order:", {
                 linkId: link.id,
@@ -622,11 +644,21 @@ export class CollectionSync {
       skipped: number;
     }
   ): Promise<void> {
-    const result = resolveConflict(existing, link);
+    const result = resolveConflict(existing, link, this.syncPreference);
 
     if (result === "use-remote") {
       // Check if link was moved to a different folder on server
-      const currentNode = await bookmarks.get(existing.browserId);
+      let currentNode: BookmarkNode | undefined;
+      try {
+        currentNode = await bookmarks.get(existing.browserId);
+      } catch {
+        // Bookmark deleted externally — skip move check, update will recreate
+        logger.info("Bookmark gone during update, skipping move check:", {
+          linkId: link.id,
+        });
+        stats.updated++;
+        return;
+      }
       const wasMoved = currentNode?.parentId !== parentBrowserId;
 
       if (wasMoved) {
@@ -657,7 +689,13 @@ export class CollectionSync {
       stats.updated++;
     } else if (result === "no-op") {
       // Check if link was moved on server (even if no content change)
-      const currentNode = await bookmarks.get(existing.browserId);
+      let currentNode: BookmarkNode | undefined;
+      try {
+        currentNode = await bookmarks.get(existing.browserId);
+      } catch {
+        // Bookmark deleted externally — skip move check
+        return;
+      }
       const wasMoved = currentNode?.parentId !== parentBrowserId;
 
       if (wasMoved) {
@@ -803,7 +841,12 @@ export class CollectionSync {
         // Use the bookmark's dateGroupModified field for accurate detection
         // Note: lastSyncTime can be 0 for first sync, so use >= 0 check
         if (lastSyncTime !== undefined && lastSyncTime >= 0) {
-          const bookmark = await bookmarks.get(mapping.browserId);
+          let bookmark: BookmarkNode | undefined;
+          try {
+            bookmark = await bookmarks.get(mapping.browserId);
+          } catch {
+            bookmark = undefined;
+          }
           if (bookmark && bookmark.dateGroupModified) {
             logger.debug("Checking reorder:", {
               bookmarkId: mapping.browserId,
@@ -1132,7 +1175,12 @@ async function findFolderByPath(
   let currentFolderId = rootFolderId;
 
   // Traverse path parts (skip first if it matches root folder name)
-  const rootFolder = await bookmarks.get(rootFolderId);
+  let rootFolder: BookmarkNode | undefined;
+  try {
+    rootFolder = await bookmarks.get(rootFolderId);
+  } catch {
+    rootFolder = undefined;
+  }
   const rootName = rootFolder?.title;
 
   let startIndex = 0;
@@ -1248,7 +1296,12 @@ export async function buildBookmarksCache(
     }
   }
 
-  const root = await bookmarks.get(rootFolderId);
+  let root: BookmarkNode | undefined;
+  try {
+    root = await bookmarks.get(rootFolderId);
+  } catch {
+    root = undefined;
+  }
   if (root) {
     await traverse(root);
   }

@@ -51,6 +51,8 @@ export interface LogEntry {
   message: string;
 }
 
+export type SyncPreference = "prefer-remote" | "prefer-local";
+
 export interface Settings {
   serverUrl: string;
   accessToken: string;
@@ -59,7 +61,12 @@ export interface Settings {
   targetCollectionId?: number;
   /** Collection name (fallback if ID not provided) */
   targetCollectionName?: string;
+  /** Top-level browser folder name to sync into (e.g., "Bookmarks Bar", "Other Bookmarks"). */
+  rootFolderName: string;
+  /** Subfolder path within the root folder. */
   browserFolderName: string;
+  /** Conflict resolution preference. Default: "prefer-remote" (server wins). */
+  syncPreference: SyncPreference;
 }
 
 export interface SectionState {

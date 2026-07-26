@@ -5,7 +5,7 @@
 
 import { useCallback } from "preact/hooks";
 import { sendMessage } from "../../utils/index";
-import type { Settings } from "../../types/storage";
+import type { Settings, SyncPreference } from "../../types/storage";
 
 export interface UseSyncActionsOptions {
   settings: Settings;
@@ -157,6 +157,31 @@ export function useSyncActions({
     [show, loadSettings]
   );
 
+  // Update root folder
+  const handleUpdateRootFolder = useCallback(
+    async (newRootFolderName: string) => {
+      try {
+        await sendMessage<{ success: boolean }>("UPDATE_ROOT_FOLDER", {
+          rootFolderName: newRootFolderName,
+        });
+        show(
+          `Root folder updated to "${newRootFolderName || "(default)"}"`,
+          "success"
+        );
+        await loadSettings();
+        return true;
+      } catch (error) {
+        console.error(
+          "[LWSync useSyncActions] Update root folder error:",
+          error
+        );
+        show(`Failed to update: ${error}`, "error");
+        return false;
+      }
+    },
+    [show, loadSettings]
+  );
+
   // Update target collection
   const handleUpdateTargetCollection = useCallback(
     async (newCollectionName: string) => {
@@ -179,6 +204,31 @@ export function useSyncActions({
     [show, loadSettings]
   );
 
+  // Update sync preference
+  const handleUpdateSyncPreference = useCallback(
+    async (newPreference: SyncPreference) => {
+      try {
+        await sendMessage<{ success: boolean }>("UPDATE_SYNC_PREFERENCE", {
+          syncPreference: newPreference,
+        });
+        show(
+          `Conflict resolution set to "${newPreference === "prefer-remote" ? "Server wins" : "Browser wins"}"`,
+          "success"
+        );
+        await loadSettings();
+        return true;
+      } catch (error) {
+        console.error(
+          "[LWSync useSyncActions] Update sync preference error:",
+          error
+        );
+        show(`Failed to update: ${error}`, "error");
+        return false;
+      }
+    },
+    [show, loadSettings]
+  );
+
   return {
     handleTestConnection,
     handleSaveSettings,
@@ -186,6 +236,8 @@ export function useSyncActions({
     handleReset,
     handleUpdateInterval,
     handleUpdateBrowserFolder,
+    handleUpdateRootFolder,
     handleUpdateTargetCollection,
+    handleUpdateSyncPreference,
   };
 }

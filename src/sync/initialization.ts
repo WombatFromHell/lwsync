@@ -42,6 +42,7 @@ export class SyncInitializer {
   async initialize(
     collectionName: string,
     browserFolderName: string,
+    rootFolderName: string = "",
     syncDirection: SyncDirection = "bidirectional"
   ): Promise<InitializationResult> {
     try {
@@ -55,18 +56,15 @@ export class SyncInitializer {
         };
       }
 
-      // Get browser root folder
+      // Resolve browser root folder: use stored ID → folder name → defaults
       const browserRootFolderId = bookmarks.getBrowserRootFolderId();
-      const rootFolder = await bookmarks.get(browserRootFolderId);
-
-      if (!rootFolder) {
-        throw new Error(
-          `Failed to get browser root folder (ID: ${browserRootFolderId})`
-        );
-      }
+      const rootFolder = await bookmarks.resolveRootFolder(
+        browserRootFolderId,
+        rootFolderName || undefined
+      );
 
       // Parse the browser folder name as a path and find/create nested folders
-      let targetFolderId = browserRootFolderId;
+      let targetFolderId = rootFolder.id;
       if (browserFolderName && browserFolderName.trim()) {
         const pathParts = parsePath(browserFolderName);
         targetFolderId = await findOrCreateNestedFolder(

@@ -137,12 +137,21 @@ export class OrphanCleanup {
     nodeId: string,
     potentialAncestorId: string
   ): Promise<boolean> {
-    let current = await bookmarks.get(nodeId);
+    let current: import("../types/bookmarks").BookmarkNode | undefined;
+    try {
+      current = await bookmarks.get(nodeId);
+    } catch {
+      return false;
+    }
     while (current && current.parentId) {
       if (current.parentId === potentialAncestorId) {
         return true;
       }
-      current = await bookmarks.get(current.parentId);
+      try {
+        current = await bookmarks.get(current.parentId);
+      } catch {
+        return false;
+      }
     }
     return false;
   }
@@ -195,7 +204,12 @@ export class OrphanCleanup {
 
       for (const mapping of allMappings) {
         // Get the bookmark to find its parent
-        const node = await bookmarks.get(mapping.browserId);
+        let node: import("../types/bookmarks").BookmarkNode | undefined;
+        try {
+          node = await bookmarks.get(mapping.browserId);
+        } catch {
+          node = undefined;
+        }
         if (!node) continue; // Bookmark was deleted or doesn't exist
 
         const parentId = node.parentId || "unknown";
@@ -290,4 +304,8 @@ class MappingMapMock implements MappingMap {
     return undefined;
   }
   upsert(_mapping: Mapping): void {}
+
+  delete(_linkwardenId: number, _type: "link" | "collection"): boolean {
+    return false;
+  }
 }

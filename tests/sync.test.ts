@@ -152,6 +152,108 @@ describe("conflict resolution edge cases", () => {
   });
 });
 
+describe("resolveConflict with sync preference", () => {
+  const createMapping = (
+    browserUpdatedAt: number,
+    checksum: string
+  ): Mapping => ({
+    id: "test-id",
+    linkwardenType: "link",
+    linkwardenId: 1,
+    browserId: "browser-1",
+    linkwardenUpdatedAt: 1000,
+    browserUpdatedAt,
+    lastSyncedAt: 500,
+    checksum,
+  });
+
+  test("prefer-remote: returns use-remote when remote is newer (default behavior)", () => {
+    const mapping = createMapping(1000, "different");
+    const remote = {
+      name: "Test",
+      url: "https://example.com",
+      updatedAt: new Date(2000).toISOString(),
+    };
+
+    const result = resolveConflict(mapping, remote, "prefer-remote");
+    expect(result).toBe("use-remote");
+  });
+
+  test("prefer-remote: returns use-local when browser is newer", () => {
+    const mapping = createMapping(3000, "different");
+    const remote = {
+      name: "Test",
+      url: "https://example.com",
+      updatedAt: new Date(2000).toISOString(),
+    };
+
+    const result = resolveConflict(mapping, remote, "prefer-remote");
+    expect(result).toBe("use-local");
+  });
+
+  test("prefer-local: returns use-local when remote is newer", () => {
+    const mapping = createMapping(1000, "different");
+    const remote = {
+      name: "Test",
+      url: "https://example.com",
+      updatedAt: new Date(5000).toISOString(),
+    };
+
+    const result = resolveConflict(mapping, remote, "prefer-local");
+    expect(result).toBe("use-local");
+  });
+
+  test("prefer-local: returns use-local when browser is newer", () => {
+    const mapping = createMapping(3000, "different");
+    const remote = {
+      name: "Test",
+      url: "https://example.com",
+      updatedAt: new Date(2000).toISOString(),
+    };
+
+    const result = resolveConflict(mapping, remote, "prefer-local");
+    expect(result).toBe("use-local");
+  });
+
+  test("prefer-local: still returns no-op when checksums match", () => {
+    const remote = {
+      name: "Test",
+      url: "https://example.com",
+      updatedAt: new Date(2000).toISOString(),
+    };
+    const checksum = computeChecksum(remote);
+    const mapping = createMapping(1000, checksum);
+
+    const result = resolveConflict(mapping, remote, "prefer-local");
+    expect(result).toBe("no-op");
+  });
+
+  test("prefer-remote: still returns no-op when checksums match", () => {
+    const remote = {
+      name: "Test",
+      url: "https://example.com",
+      updatedAt: new Date(2000).toISOString(),
+    };
+    const checksum = computeChecksum(remote);
+    const mapping = createMapping(1000, checksum);
+
+    const result = resolveConflict(mapping, remote, "prefer-remote");
+    expect(result).toBe("no-op");
+  });
+
+  test("defaults to prefer-remote when no preference specified", () => {
+    const mapping = createMapping(1000, "different");
+    const remote = {
+      name: "Test",
+      url: "https://example.com",
+      updatedAt: new Date(2000).toISOString(),
+    };
+
+    const result = resolveConflict(mapping, remote);
+    expect(result).toBe("use-remote");
+  });
+});
+
 describe("Move token helpers", () => {
   describe("appendMoveToken", () => {
     test("appends token to empty description", () => {

@@ -108,6 +108,15 @@ class MappingMap {
     this.byLinkwardenId.set(key, mapping);
     this.byBrowserId.set(mapping.browserId, mapping);
   }
+
+  delete(linkwardenId: number, type: "link" | "collection"): boolean {
+    const key = `${type}:${linkwardenId}`;
+    const existing = this.byLinkwardenId.get(key);
+    if (!existing) return false;
+    this.byBrowserId.delete(existing.browserId);
+    this.byLinkwardenId.delete(key);
+    return true;
+  }
 }
 
 export class SyncEngine {
@@ -401,14 +410,14 @@ export class SyncEngine {
   async initialize(
     collectionName: string,
     browserFolderName: string,
+    rootFolderName: string = "",
     syncDirection:
-      | "bidirectional"
-      | "to-browser"
-      | "to-linkwarden" = "bidirectional"
+      "bidirectional" | "to-browser" | "to-linkwarden" = "bidirectional"
   ): Promise<{ success: boolean; error?: string; collectionId?: number }> {
     return await this.initializer.initialize(
       collectionName,
       browserFolderName,
+      rootFolderName,
       syncDirection
     );
   }

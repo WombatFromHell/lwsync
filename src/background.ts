@@ -11,6 +11,7 @@ import { SyncLogCollector } from "./utils/logCollector";
 import { getDefaultCollectionName } from "./browser";
 import { CONFIG } from "./config";
 import { createMessageRouter } from "./utils/messageRouter";
+import { setupCorsRules, removeCorsRules } from "./cors";
 import type {
   ChromeMessage,
   MessageType,
@@ -19,6 +20,8 @@ import type {
   UpdateSyncIntervalMessage,
   UpdateTargetCollectionMessage,
   UpdateBrowserFolderMessage,
+  UpdateRootFolderMessage,
+  UpdateSyncPreferenceMessage,
 } from "./types/background";
 
 // Initialize global log collector
@@ -54,8 +57,12 @@ async function initSyncEngine(): Promise<void> {
 
   if (!settings?.serverUrl || !settings?.accessToken) {
     logger.info("Not configured, skipping initialization");
+    await removeCorsRules();
     return;
   }
+
+  // Set up CORS bypass rules for Firefox (no-op on Chrome)
+  await setupCorsRules(settings.serverUrl, settings.accessToken);
 
   const api = new LinkwardenAPI(settings.serverUrl, settings.accessToken);
   syncEngine = new SyncEngine(api);
@@ -69,16 +76,17 @@ async function initSyncEngine(): Promise<void> {
   // Resolve collection identifier (ID preferred, then name, then default)
   const collectionIdentifier = resolveCollectionIdentifier(settings);
   const browserFolderName = settings.browserFolderName || "";
+  const rootFolderName = settings.rootFolderName || "";
 
   logger.info("Initializing sync:", {
     collection: collectionIdentifier,
-    browserFolder: browserFolderName,
+    browserFolderName: browserFolderName,
     interval: settings.syncInterval,
   });
 
   await addLogEntry(
     "info",
-    `Initialized - Collection: "${collectionIdentifier}", Browser Folder: "${browserFolderName}", Interval: ${settings.syncInterval} min`
+    `Initialized - Collection: "${collectionIdentifier}", Root Folder: "${rootFolderName || "(default)"}", Browser Folder: "${browserFolderName}", Interval: ${settings.syncInterval} min`
   );
 
   // Auto-initialize sync if not already configured
@@ -90,7 +98,8 @@ async function initSyncEngine(): Promise<void> {
     );
     const result = await syncEngine.initialize(
       collectionIdentifier,
-      browserFolderName
+      browserFolderName,
+      rootFolderName
     );
     if (result.success) {
       await addLogEntry(
@@ -130,8 +139,15 @@ function resolveCollectionIdentifier(settings: {
  */
 async function performSync(): Promise<void> {
   if (!syncEngine) {
-    logger.info("Sync engine not initialized");
-    return;
+    logger.info("Sync engine not initialized, attempting initialization...");
+    await initSyncEngine();
+    if (!syncEngine) {
+      await addLogEntry(
+        "error",
+        "Sync not configured. Please set up connection in popup."
+      );
+      return;
+    }
   }
 
   if (syncEngine.syncing) {
@@ -143,6 +159,33 @@ async function performSync(): Promise<void> {
 
   try {
     const result = await syncEngine.sync();
+
+    // ponytail: If sync failed because metadata is missing (e.g. first
+    // alarm after a failed init), retry initialization once then retry sync.
+    if (
+      result.errors.length > 0 &&
+      result.errors.some((e) => e.includes("Sync not configured"))
+    ) {
+      logger.info("Sync not configured, retrying initialization...");
+      await initSyncEngine();
+      if (!syncEngine) {
+        await addLogEntry(
+          "error",
+          "Sync initialization failed. Check your connection settings."
+        );
+        return;
+      }
+      const retryResult = await syncEngine.sync();
+      const retrySummary = `${retryResult.created} created, ${retryResult.updated} updated, ${retryResult.deleted} deleted, ${retryResult.skipped} skipped`;
+      await addLogEntry("success", retrySummary);
+      for (const err of retryResult.errors) {
+        await addLogEntry("error", err);
+      }
+      void chrome.runtime
+        .sendMessage({ type: "SYNC_COMPLETE", payload: retryResult })
+        .catch(() => {});
+      return;
+    }
 
     const summary = `${result.created} created, ${result.updated} updated, ${result.deleted} deleted, ${result.skipped} skipped`;
     await addLogEntry("success", summary);
@@ -206,7 +249,9 @@ function setupMessageListener(): void {
       syncInterval: payload.syncInterval,
       targetCollectionName:
         payload.targetCollectionName || getDefaultCollectionName(),
+      rootFolderName: payload.rootFolderName || "",
       browserFolderName: payload.browserFolderName || "",
+      syncPreference: payload.syncPreference ?? "prefer-remote",
     };
     return storage
       .saveSettings(settingsWithDefaults)
@@ -230,13 +275,17 @@ function setupMessageListener(): void {
           syncInterval: CONFIG.sync.DEFAULT_SYNC_INTERVAL,
           targetCollectionId: undefined,
           targetCollectionName: getDefaultCollectionName(),
+          rootFolderName: "",
           browserFolderName: "",
+          syncPreference: "prefer-remote",
         };
       }
       return {
         ...settings,
         targetCollectionName:
           settings.targetCollectionName || getDefaultCollectionName(),
+        rootFolderName: settings.rootFolderName || "",
+        syncPreference: settings.syncPreference || "prefer-remote",
       };
     })
   );
@@ -267,6 +316,8 @@ function setupMessageListener(): void {
         syncEngine = null;
         // Clear sync alarm
         void chrome.alarms.clear("lwsync-sync");
+        // Remove CORS bypass rules
+        void removeCorsRules();
         return { success: true };
       })
       .catch((error: Error) => {
@@ -428,6 +479,55 @@ function setupMessageListener(): void {
           void addLogEntry(
             "info",
             `Browser folder updated to "${payload.browserFolderName}"`
+          );
+          return { success: true };
+        })
+  );
+
+  router.register("UPDATE_ROOT_FOLDER", (payload: UpdateRootFolderMessage) =>
+    storage
+      .getSettings()
+      .then((settings) => {
+        if (!settings) {
+          throw new Error("Settings not found");
+        }
+        return storage.saveSettings({
+          ...settings,
+          rootFolderName: payload.rootFolderName,
+        });
+      })
+      .then(() => {
+        // Clear sync metadata to force re-initialization on next sync
+        storage.saveSyncMetadata(null as never);
+      })
+      .then(() => initSyncEngine())
+      .then(() => {
+        void addLogEntry(
+          "info",
+          `Root folder updated to "${payload.rootFolderName || "(default)"}"`
+        );
+        return { success: true };
+      })
+  );
+
+  router.register(
+    "UPDATE_SYNC_PREFERENCE",
+    (payload: UpdateSyncPreferenceMessage) =>
+      storage
+        .getSettings()
+        .then((settings) => {
+          if (!settings) {
+            throw new Error("Settings not found");
+          }
+          return storage.saveSettings({
+            ...settings,
+            syncPreference: payload.syncPreference,
+          });
+        })
+        .then(() => {
+          void addLogEntry(
+            "info",
+            `Sync preference updated to "${payload.syncPreference}"`
           );
           return { success: true };
         })

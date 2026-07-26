@@ -234,6 +234,8 @@ export async function saveSettings(settings: Settings): Promise<void> {
     targetCollectionId: settings.targetCollectionId,
     targetCollectionName: settings.targetCollectionName,
     browserFolderName: settings.browserFolderName || "",
+    rootFolderName: settings.rootFolderName || "",
+    syncPreference: settings.syncPreference || "prefer-remote",
   };
   await saveAll(data);
 }

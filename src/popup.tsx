@@ -99,10 +99,14 @@ function App() {
           <CommonSettingsSection
             targetCollectionName={settings.targetCollectionName || ""}
             onUpdateTargetCollection={actions.handleUpdateTargetCollection}
+            rootFolderName={settings.rootFolderName || ""}
+            onUpdateRootFolder={actions.handleUpdateRootFolder}
             browserFolderName={settings.browserFolderName || ""}
             onUpdateBrowserFolder={actions.handleUpdateBrowserFolder}
             syncInterval={settings.syncInterval}
             onUpdateInterval={actions.handleUpdateInterval}
+            syncPreference={settings.syncPreference}
+            onUpdateSyncPreference={actions.handleUpdateSyncPreference}
             disabled={!status.configured}
           />
           <LogSection

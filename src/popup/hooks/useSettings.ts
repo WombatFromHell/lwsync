@@ -8,14 +8,18 @@ import { sendMessage } from "../../utils/index";
 import { getDefaultCollectionName } from "../../browser";
 import type { Settings } from "../../types/storage";
 
+const defaultSettings: Settings = {
+  serverUrl: "",
+  accessToken: "",
+  syncInterval: 5,
+  targetCollectionName: getDefaultCollectionName(),
+  rootFolderName: "",
+  browserFolderName: "",
+  syncPreference: "prefer-remote",
+};
+
 export function useSettings() {
-  const [settings, setSettings] = useState<Settings>({
-    serverUrl: "",
-    accessToken: "",
-    syncInterval: 5,
-    targetCollectionName: getDefaultCollectionName(),
-    browserFolderName: "",
-  });
+  const [settings, setSettings] = useState<Settings>({ ...defaultSettings });
 
   const loadSettings = useCallback(async () => {
     try {
@@ -27,17 +31,13 @@ export function useSettings() {
           syncInterval: response.syncInterval || 5,
           targetCollectionName:
             response.targetCollectionName || getDefaultCollectionName(),
+          rootFolderName: response.rootFolderName || "",
           browserFolderName: response.browserFolderName || "",
+          syncPreference: response.syncPreference || "prefer-remote",
         });
       } else {
         // Reset to defaults if no settings (e.g., after reset)
-        setSettings({
-          serverUrl: "",
-          accessToken: "",
-          syncInterval: 5,
-          targetCollectionName: getDefaultCollectionName(),
-          browserFolderName: "",
-        });
+        setSettings({ ...defaultSettings });
       }
     } catch (error) {
       console.error("[LWSync useSettings] Settings load error:", error);
@@ -63,7 +63,9 @@ export function useSettings() {
           accessToken: newSettings.accessToken,
           syncInterval: newSettings.syncInterval,
           targetCollectionName: newSettings.targetCollectionName,
+          rootFolderName: newSettings.rootFolderName,
           browserFolderName: newSettings.browserFolderName,
+          syncPreference: newSettings.syncPreference,
         });
         return true;
       } catch (error) {

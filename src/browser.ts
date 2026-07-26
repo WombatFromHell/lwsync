@@ -8,13 +8,9 @@ export type BrowserType = "firefox" | "chrome" | "edge" | "safari" | "unknown";
 
 /**
  * Detect the current browser
+ * ponytail: userAgent first — Chrome 128+ exposes `browser` global, breaking the old check
  */
 export function detectBrowser(): BrowserType {
-  // @ts-expect-error - browser specific globals
-  if (typeof browser !== "undefined" && browser.runtime) {
-    return "firefox";
-  }
-
   const userAgent = navigator.userAgent;
 
   if (userAgent.includes("Edg/")) {
@@ -27,6 +23,13 @@ export function detectBrowser(): BrowserType {
 
   if (userAgent.includes("Safari")) {
     return "safari";
+  }
+
+  // Firefox: userAgent lacks "Chrome", and may not have "Safari" either
+  // Check for the browser global as a Firefox-specific signal
+  // @ts-expect-error - browser specific globals
+  if (typeof browser !== "undefined" && browser.runtime) {
+    return "firefox";
   }
 
   return "unknown";

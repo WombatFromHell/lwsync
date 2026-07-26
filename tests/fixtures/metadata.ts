@@ -46,6 +46,8 @@ export function createSettings(overrides: Partial<Settings> = {}): Settings {
     targetCollectionId: undefined,
     targetCollectionName: "Bookmarks",
     browserFolderName: "",
+    rootFolderName: "",
+    syncPreference: "prefer-remote",
     ...overrides,
   };
 }

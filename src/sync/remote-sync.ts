@@ -46,6 +46,11 @@ export class RemoteSync {
     const stats = new SyncStats();
 
     try {
+      // Read sync preference from settings
+      const settings = await storage.getSettings();
+      this.collectionSync.syncPreference =
+        settings?.syncPreference ?? "prefer-remote";
+
       // Fetch collection tree from Linkwarden
       const collection = await this.fetchCollectionTree(
         metadata.targetCollectionId
@@ -172,17 +177,17 @@ export class RemoteSync {
    */
   private async ensureRootFolder(browserRootFolderId: string): Promise<string> {
     try {
-      let rootFolder = await bookmarks.get(browserRootFolderId);
+      // Read root folder name from settings for name-based fallback
+      const settings = await storage.getSettings();
+      const rootFolderName = settings?.rootFolderName || undefined;
 
-      if (!rootFolder) {
-        // Root folder doesn't exist - create fallback
-        const otherBookmarks = await bookmarks.getOtherBookmarksFolder();
-        rootFolder = await bookmarks.create({
-          parentId: otherBookmarks?.id,
-          title: "LWSync Root",
-        });
+      const rootFolder = await bookmarks.resolveRootFolder(
+        browserRootFolderId,
+        rootFolderName
+      );
 
-        // Update metadata with new root folder ID
+      // Update metadata if we fell back to a different folder
+      if (rootFolder.id !== browserRootFolderId) {
         const metadata = await storage.getSyncMetadata();
         if (metadata) {
           metadata.browserRootFolderId = rootFolder.id;

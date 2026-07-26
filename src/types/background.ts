@@ -8,7 +8,9 @@ export interface SaveSettingsMessage {
   accessToken: string;
   syncInterval: number;
   targetCollectionName?: string;
+  rootFolderName?: string;
   browserFolderName?: string;
+  syncPreference?: "prefer-remote" | "prefer-local";
 }
 
 export interface UpdateSyncIntervalMessage {
@@ -21,6 +23,14 @@ export interface UpdateTargetCollectionMessage {
 
 export interface UpdateBrowserFolderMessage {
   browserFolderName: string;
+}
+
+export interface UpdateRootFolderMessage {
+  rootFolderName: string;
+}
+
+export interface UpdateSyncPreferenceMessage {
+  syncPreference: "prefer-remote" | "prefer-local";
 }
 
 export interface TestConnectionMessage {
@@ -41,6 +51,8 @@ export interface MessageMap {
   UPDATE_SYNC_INTERVAL: UpdateSyncIntervalMessage;
   UPDATE_TARGET_COLLECTION: UpdateTargetCollectionMessage;
   UPDATE_BROWSER_FOLDER: UpdateBrowserFolderMessage;
+  UPDATE_ROOT_FOLDER: UpdateRootFolderMessage;
+  UPDATE_SYNC_PREFERENCE: UpdateSyncPreferenceMessage;
   COMPARE_SYNC: never;
   GET_DIAGNOSTICS: never;
 }
