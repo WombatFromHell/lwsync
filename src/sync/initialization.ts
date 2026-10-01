@@ -13,6 +13,7 @@ import * as storage from "../storage";
 import * as bookmarks from "../bookmarks";
 import { SyncErrorReporter, createErrorContext } from "./errorReporter";
 import { RemoteSync } from "./remote-sync";
+import type { MappingMap } from "./collections";
 import { parseFolderPath as parsePath } from "../utils";
 import { findOrCreateNestedFolder } from "./collections";
 import { createLogger } from "../utils";
@@ -30,10 +31,16 @@ export type SyncDirection = "bidirectional" | "to-browser" | "to-linkwarden";
 export class SyncInitializer {
   private api: LinkwardenAPI;
   private errors: SyncErrorReporter;
+  private cache: MappingMap;
 
-  constructor(api: LinkwardenAPI, errorReporter?: SyncErrorReporter) {
+  constructor(
+    api: LinkwardenAPI,
+    errorReporter: SyncErrorReporter,
+    cache: MappingMap
+  ) {
     this.api = api;
-    this.errors = errorReporter || new SyncErrorReporter();
+    this.errors = errorReporter;
+    this.cache = cache;
   }
 
   /**
@@ -55,15 +62,16 @@ export class SyncInitializer {
         };
       }
 
-      // Get browser root folder
-      const browserRootFolderId = bookmarks.getBrowserRootFolderId();
-      const rootFolder = await bookmarks.get(browserRootFolderId);
+      // Resolve browser root folder from the tree (hardcoded IDs are
+      // unreliable after Chrome/Edge bookmark re-IDs, crbug 456225717)
+      const rootFolder = await bookmarks.getBrowserRootFolder();
+      const browserRootFolderId = rootFolder.id;
 
-      if (!rootFolder) {
-        throw new Error(
-          `Failed to get browser root folder (ID: ${browserRootFolderId})`
-        );
-      }
+      logger.info("Browser root folder:", {
+        id: rootFolder.id,
+        title: rootFolder.title,
+        children: (rootFolder.children ?? []).slice(0, 5).map((c) => c.title),
+      });
 
       // Parse the browser folder name as a path and find/create nested folders
       let targetFolderId = browserRootFolderId;
@@ -86,7 +94,7 @@ export class SyncInitializer {
       await storage.saveSyncMetadata(metadata);
 
       // Perform initial sync
-      const remoteSync = new RemoteSync(this.api, this.errors);
+      const remoteSync = new RemoteSync(this.api, this.errors, this.cache);
       const stats = await remoteSync.syncFromLinkwarden(metadata);
 
       logger.info("Initialization complete:", stats.toString());
@@ -226,12 +234,5 @@ export class SyncInitializer {
       );
       return null;
     }
-  }
-
-  /**
-   * Get the error reporter for this instance
-   */
-  getErrorReporter(): SyncErrorReporter {
-    return this.errors;
   }
 }

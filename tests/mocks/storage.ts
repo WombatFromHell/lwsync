@@ -117,21 +117,6 @@ export class MockStorage {
   }
 
   /**
-   * Get all data (for testing assertions)
-   * Returns a copy by default, pass true for direct reference
-   */
-  getAllData(copy = true): Record<string, unknown> {
-    return copy ? { ...this.data } : this.data;
-  }
-
-  /**
-   * Set all data (for test setup)
-   */
-  setAllData(data: Record<string, unknown>): void {
-    this.data = { ...data };
-  }
-
-  /**
    * Clear all data (for test cleanup)
    */
   clearAll(): void {

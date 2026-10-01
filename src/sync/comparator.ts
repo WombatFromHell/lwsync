@@ -22,8 +22,6 @@ import type {
   Conflict,
   ComparisonOptions,
   ComparisonSummary,
-  SyncRecommendationResult,
-  SyncRecommendation,
 } from "../types/comparator";
 import { SyncErrorReporter, createErrorContext } from "./errorReporter";
 import { computeChecksum, generateId, now } from "../utils";
@@ -57,12 +55,12 @@ export class SyncComparator {
 
   constructor(
     api: LinkwardenAPI,
-    errorReporter?: SyncErrorReporter,
-    cache?: MappingMap
+    errorReporter: SyncErrorReporter,
+    cache: MappingMap
   ) {
     this.api = api;
-    this.errors = errorReporter || new SyncErrorReporter();
-    this.cache = cache || new MappingMapMock();
+    this.errors = errorReporter;
+    this.cache = cache;
   }
 
   /**
@@ -615,69 +613,6 @@ export class SyncComparator {
   }
 
   /**
-   * Generate sync recommendation based on comparison
-   */
-  generateRecommendation(comparison: SyncComparison): SyncRecommendationResult {
-    const { toUpload, toDownload, conflicts, summary } = comparison;
-
-    const actions: SyncRecommendationResult["actions"] = [];
-
-    if (toUpload.length > 0) {
-      actions.push({
-        type: "upload",
-        count: toUpload.length,
-        description: `Upload ${toUpload.length} bookmark${toUpload.length > 1 ? "s" : ""} to server`,
-      });
-    }
-
-    if (toDownload.length > 0) {
-      actions.push({
-        type: "download",
-        count: toDownload.length,
-        description: `Download ${toDownload.length} link${toDownload.length > 1 ? "s" : ""} from server`,
-      });
-    }
-
-    if (conflicts.length > 0) {
-      actions.push({
-        type: "resolve_conflict",
-        count: conflicts.length,
-        description: `Resolve ${conflicts.length} conflict${conflicts.length > 1 ? "s" : ""}`,
-      });
-    }
-
-    // Determine direction
-    let direction: SyncRecommendation = "none";
-    let confidence: "high" | "medium" | "low" = "low";
-    let explanation = "Already in sync";
-
-    if (actions.length === 0) {
-      direction = "none";
-      confidence = "high";
-      explanation = "All items are synced, no action needed";
-    } else if (toUpload.length > toDownload.length * 2) {
-      direction = "upload";
-      confidence = toUpload.length > 10 ? "high" : "medium";
-      explanation = `Mostly browser changes (${toUpload.length} to upload vs ${toDownload.length} to download)`;
-    } else if (toDownload.length > toUpload.length * 2) {
-      direction = "download";
-      confidence = toDownload.length > 10 ? "high" : "medium";
-      explanation = `Mostly server changes (${toDownload.length} to download vs ${toUpload.length} to upload)`;
-    } else if (actions.length > 0) {
-      direction = "bidirectional";
-      confidence = "medium";
-      explanation = `Changes on both sides (${summary.toUploadCount} upload, ${summary.toDownloadCount} download, ${summary.conflictCount} conflicts)`;
-    }
-
-    return {
-      direction,
-      confidence,
-      explanation,
-      actions,
-    };
-  }
-
-  /**
    * Scan browser bookmarks and queue unmapped ones for sync
    * This is the merged functionality from the old BookmarkScanner
    */
@@ -781,24 +716,4 @@ export class SyncComparator {
 
     return result;
   }
-}
-
-/**
- * Mock MappingMap for backward compatibility
- */
-class MappingMapMock implements MappingMap {
-  get size(): number {
-    return 0;
-  }
-  async load(): Promise<void> {}
-  getMappingByLinkwardenId(
-    _id: number,
-    _type: "link" | "collection"
-  ): Mapping | undefined {
-    return undefined;
-  }
-  getMappingByBrowserId(_browserId: string): Mapping | undefined {
-    return undefined;
-  }
-  upsert(_mapping: Mapping): void {}
 }

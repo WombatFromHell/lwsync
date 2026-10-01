@@ -125,26 +125,3 @@ export interface ComparisonOptions {
   /** Maximum items to return per category (default: unlimited) */
   limit?: number;
 }
-
-/**
- * Sync direction recommendation
- */
-export type SyncRecommendation =
-  | "upload" // Mostly browser changes
-  | "download" // Mostly server changes
-  | "bidirectional" // Changes on both sides
-  | "none"; // Already in sync
-
-/**
- * Recommendation with explanation
- */
-export interface SyncRecommendationResult {
-  direction: SyncRecommendation;
-  confidence: "high" | "medium" | "low";
-  explanation: string;
-  actions: Array<{
-    type: "upload" | "download" | "resolve_conflict";
-    count: number;
-    description: string;
-  }>;
-}

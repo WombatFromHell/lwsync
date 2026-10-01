@@ -3,17 +3,9 @@
  * Handles conflict detection and resolution between Linkwarden and browser bookmarks
  */
 
-import { computeChecksum as computeItemChecksum } from "../utils";
-import type { ChecksumItem, ConflictResult } from "../types/sync";
+import { computeChecksum } from "../utils";
+import type { ConflictResult } from "../types/sync";
 import type { Mapping } from "../types/storage";
-
-/**
- * Compute checksum for a Linkwarden item (for change detection)
- * Re-export for backward compatibility
- */
-export function computeChecksum(item: ChecksumItem): string {
-  return computeItemChecksum(item);
-}
 
 /**
  * Resolve conflicts between Linkwarden and browser bookmark

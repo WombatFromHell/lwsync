@@ -1,6 +1,6 @@
 # Linkwarden Browser Extension - Design Document
 
-**Status:** ✅ Consolidation Complete | **Modules:** 12 sync files (-20%) | **Tests:** 122 passing
+**Status:** ✅ Consolidation Complete | **Modules:** 13 sync files | **Tests:** 87 (72 unit + 15 E2E; E2E requires a valid API token)
 
 Bidirectional sync between Linkwarden collections and browser bookmarks. Manifest V3 (Chrome, Firefox 128+, Edge).
 
@@ -21,6 +21,7 @@ flowchart TB
         Browser["BrowserChangeApplier<br/>Browser → Server"]
         Remote["RemoteSync<br/>Server → Browser"]
         Collection["CollectionSync<br/>+ path helpers"]
+        Links["CollectionLinkSync<br/>Link sync + order"]
         Comparator["SyncComparator<br/>Conflict Detection"]
     end
     
@@ -32,6 +33,8 @@ flowchart TB
     BG --> Engine
     Engine --> Browser
     Engine --> Remote
+    Engine --> Collection
+    Collection --> Links
     Engine --> Comparator
     Browser <--> Bookmarks
     Remote <--> API
@@ -42,17 +45,18 @@ flowchart TB
 
 | Module | Responsibility | LOC |
 |--------|---------------|-----|
-| **SyncEngine** | Orchestrates sync cycle, coordinates modules | ~350 |
-| **BrowserChangeApplier** | Browser → Server (create, update, delete, move) + BatchOperations | ~580 |
-| **RemoteSync** | Server → Browser (fetch tree, apply changes) | ~200 |
-| **CollectionSync** | Collection + Link sync, path helpers, order restoration | ~1200 |
-| **SyncComparator** | Compare browser/server, detect conflicts | ~700 |
-| **SyncInitializer** | First-time setup, collection creation | ~240 |
-| **OrphanCleanup** | Remove deleted items from mappings | ~200 |
-| **Moves** | Move token parsing/validation | ~100 |
-| **Conflict** | Checksum + LWW resolution | ~50 |
-| **ItemOrderToken** | Order token generation/parsing | ~200 |
-| **ErrorReporter** | Cross-module error collection | ~150 |
+| **SyncEngine** | Orchestrates sync cycle, coordinates modules | 434 |
+| **BrowserChangeApplier** | Browser → Server (create, update, delete, move) + batch move/delete processing | 575 |
+| **RemoteSync** | Server → Browser (fetch tree, apply changes) | 298 |
+| **CollectionSync** | Collection sync, path helpers, move detection | 552 |
+| **CollectionLinkSync** | Link sync, order restoration, order-token push | 443 |
+| **SyncComparator** | Compare browser/server, detect conflicts | 719 |
+| **SyncInitializer** | First-time setup, collection creation | 239 |
+| **OrphanCleanup** | Remove deleted items from mappings | 251 |
+| **Moves** | Move token parsing/validation | 101 |
+| **Conflict** | Checksum + LWW resolution | 35 |
+| **ItemOrderToken** | Order token generation/parsing | 133 |
+| **ErrorReporter** | Cross-module error collection | 196 |
 
 ---
 
@@ -277,6 +281,8 @@ flowchart TD
 **Retryable:** Network failures, 5xx, 429 (with `Retry-After`)
 **Non-retryable:** 4xx (except 429), 401, 404
 
+Retry lives inline in the API client (`src/api.ts`); `src/utils/apiErrorHandler.ts` handles error *classification* for user-facing messages.
+
 ---
 
 ## 8. Tech Stack
@@ -301,11 +307,12 @@ src/
 ├── api.ts                     # Linkwarden API client
 ├── bookmarks.ts               # Bookmarks wrapper
 ├── popup.tsx                  # UI (Preact + Tailwind)
-├── sync/                      # 12 modules
+├── sync/                      # 13 modules
 │   ├── engine.ts              # Main orchestrator
-│   ├── browser-changes.ts     # Browser → Server + BatchOperations
+│   ├── browser-changes.ts     # Browser → Server + batch move/delete processing
 │   ├── remote-sync.ts         # Server → Browser
-│   ├── collections.ts         # Collection + Link sync + path helpers
+│   ├── collections.ts         # Collection sync + path helpers
+│   ├── collection-links.ts    # Link sync + order restoration
 │   ├── comparator.ts          # Conflict detection
 │   ├── initialization.ts      # First-time setup
 │   ├── orphans.ts             # Orphan cleanup
@@ -314,18 +321,18 @@ src/
 │   ├── item-order-token.ts    # Order tokens
 │   ├── errorReporter.ts       # Error collection
 │   └── index.ts               # Barrel exports
-├── storage/                   # Storage wrapper (4 modules)
+├── storage/                   # Storage wrapper (single module)
 ├── types/                     # TypeScript types
-└── utils/                     # Utilities
+└── utils/                     # Utilities (error classification, logging, messages)
 
 tests/
-├── fixtures/                  # Test data factories
 ├── mocks/                     # Mock implementations
-├── sync.test.ts               # Pure functions (28 tests)
-├── item-order-token.test.ts   # Order tokens (32 tests)
+├── utils/                     # Test utilities (generators, cleanup, config)
+├── sync.test.ts               # Sync engine (38 tests)
+├── item-order-token.test.ts   # Order tokens (31 tests)
+├── bookmarks.test.ts          # Bookmarks wrapper (3 tests)
 ├── smoke.test.ts              # E2E basic (~10s)
-├── e2e-advanced.test.ts       # E2E advanced (~15s)
-└── performance/               # Performance tests (13 tests)
+└── e2e-advanced.test.ts       # E2E advanced (~15s)
 ```
 
 ---
@@ -345,9 +352,10 @@ bun run format        # Prettier format
 bun run quality       # Lint + format
 
 # Testing
-bun test              # All tests (122 tests, ~30s)
-bun test tests/sync.test.ts              # Unit: pure functions
+bun test              # All tests (87 tests)
+bun test tests/sync.test.ts              # Unit: sync engine
 bun test tests/item-order-token.test.ts  # Unit: order tokens
+bun test tests/bookmarks.test.ts         # Unit: bookmarks wrapper
 bun test tests/smoke.test.ts             # E2E: real API
 bun test tests/e2e-advanced.test.ts      # E2E: advanced
 
@@ -370,7 +378,7 @@ bun run verify        # Verify checksums
 | 5 | No content archival | URLs/titles only |
 | 6 | LWW conflict resolution | Simple, debuggable |
 | 7 | Server-side order tokens | Cross-device sync |
-| 8 | Batch API operations | 10x faster than sequential |
+| 8 | Grouped moves with individual API calls | Linkwarden has no batch move endpoint; grouping keeps calls deterministic |
 | 9 | Path-based fallback | Recovery when mappings lost |
 | 10 | Move tokens in description | Track moves without API support |
 | 11 | Error reporter pattern | Collect errors without failing sync |
@@ -399,34 +407,29 @@ bun run verify        # Verify checksums
 
 ```mermaid
 flowchart TD
-    subgraph E2E["E2E (18 tests)"]
-        E1["smoke.test.ts"]
-        E2["e2e-advanced.test.ts"]
+    subgraph E2E["E2E (15 tests)"]
+        E1["smoke.test.ts - 8 tests"]
+        E2["e2e-advanced.test.ts - 7 tests"]
     end
     
-    subgraph Unit["Unit (60 tests)"]
-        U1["sync.test.ts - 28 tests"]
-        U2["item-order-token.test.ts - 32 tests"]
-    end
-    
-    subgraph Perf["Performance (13 tests)"]
-        P1["parallel.test.ts"]
-        P2["caching.test.ts"]
+    subgraph Unit["Unit (72 tests)"]
+        U1["sync.test.ts - 38 tests"]
+        U2["item-order-token.test.ts - 31 tests"]
+        U3["bookmarks.test.ts - 3 tests"]
     end
     
     E2 --> E1
     U2 --> U1
-    P2 --> P1
 ```
 
 ### Test Infrastructure
 
 | Module | Purpose |
 |--------|---------|
-| **Factories** | `createMapping()`, `createLink()`, `createCollection()` |
 | **Mocks** | `MockStorage`, `MockBookmarks`, `MockLinkwardenAPI` |
-| **Builders** | Fluent test data builders |
-| **Utilities** | `uniqueId()`, `uniqueUrl()`, `timestamp()` |
+| **Utilities** | `uniqueId()`, `uniqueUrl()`, `timestamp()`, server resource cleanup |
+
+Test data helpers (e.g. `createMapping()`) live inline in the test files that use them.
 
 **Rule:** Never mock system-under-test. Only mock browser APIs.
 
@@ -459,10 +462,11 @@ flowchart TD
 | 9 | Bookmark order preservation | ✅ |
 | 10 | Optimized fetch + API compliance | ✅ |
 | 11 | Server-side order tokens | ✅ |
-| 12 | **Code consolidation (-3 modules)** | ✅ |
+| 12 | Code consolidation (-3 modules) | ✅ |
+| 13 | Dead-code removal (src −18.5%, tests −32%) | ✅ |
 
 ---
 
 **Last Updated:** 2026-03-06
-**Version:** 1.0.0
-**Sync Modules:** 12 files (was 15)
+**Version:** 1.1.0
+**Sync Modules:** 13 files

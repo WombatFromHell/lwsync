@@ -164,17 +164,6 @@ export class LinkwardenAPI {
   }
 
   /**
-   * Get links for a specific collection
-   * @deprecated Use getLinksByCollection() instead - uses /api/v1/search endpoint
-   */
-  async getCollectionLinks(collectionId: number): Promise<LinkwardenLink[]> {
-    logger.warn(
-      "getCollectionLinks is deprecated, use getLinksByCollection() instead"
-    );
-    return this.getLinksByCollection(collectionId);
-  }
-
-  /**
    * Get a collection tree recursively (collection with all subcollections and links)
    * Uses optimized getLinksByCollection() endpoint for fetching links
    */
@@ -357,15 +346,6 @@ export class LinkwardenAPI {
   }
 
   /**
-   * Search links
-   */
-  async searchLinks(query: string): Promise<LinkwardenLink[]> {
-    return this.request<LinkwardenLink[]>(
-      `/search?searchQueryString=${encodeURIComponent(query)}`
-    );
-  }
-
-  /**
    * Test API connection and authentication
    */
   async testConnection(): Promise<boolean> {
@@ -475,22 +455,4 @@ export function createDevClient(): LinkwardenAPI {
   }
 
   return new LinkwardenAPI(url, token);
-}
-
-/**
- * Get the target collection name from environment or default
- */
-export function getTargetCollectionName(): string {
-  return getEnvVarWithDefault("COLLECTION", "Bookmarks");
-}
-
-/**
- * Find a collection by name (case-sensitive)
- */
-export async function findCollectionByName(
-  api: LinkwardenAPI,
-  name: string
-): Promise<LinkwardenCollection | null> {
-  const collections = await api.getCollections();
-  return collections.find((c) => c.name === name) || null;
 }

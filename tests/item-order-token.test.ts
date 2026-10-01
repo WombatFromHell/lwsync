@@ -9,12 +9,10 @@ import {
   generateOrderHash,
   formatOrderToken,
   parseOrderToken,
-  extractOrderToken,
   removeOrderToken,
   appendOrderToken,
   verifyOrderHash,
   getTokenInfo,
-  ensureOrderToken,
 } from "../src/sync/item-order-token";
 
 describe("generateOrderHash", () => {
@@ -115,25 +113,6 @@ describe("parseOrderToken", () => {
     );
     expect(result?.hash).toBe("47b2f5fa");
     expect(result?.index).toBe(3);
-  });
-});
-
-describe("extractOrderToken", () => {
-  it("should extract token string", () => {
-    const token = extractOrderToken('[LW:O:{"47b2f5fa":"3"}]');
-    expect(token).toBe('[LW:O:{"47b2f5fa":"3"}]');
-  });
-
-  it("should return null for no token", () => {
-    const token = extractOrderToken("No token here");
-    expect(token).toBeNull();
-  });
-
-  it("should extract embedded token", () => {
-    const token = extractOrderToken(
-      'My bookmark [LW:O:{"abcd1234":"5"}] extra text'
-    );
-    expect(token).toBe('[LW:O:{"abcd1234":"5"}]');
   });
 });
 
@@ -258,79 +237,5 @@ describe("getTokenInfo", () => {
   it("should return hasToken: false for no token", () => {
     const info = getTokenInfo("No token here", "Test");
     expect(info).toEqual({ hasToken: false });
-  });
-});
-
-describe("ensureOrderToken", () => {
-  it("should add token to description without token", () => {
-    const result = ensureOrderToken("My Bookmark", "My Bookmark", 2);
-    expect(result.tokenUpdated).toBe(true);
-    expect(result.description).toMatch(/\[LW:O:\{.+\}\]/);
-    expect(result.description).toContain("My Bookmark");
-  });
-
-  it("should not update if token is current", () => {
-    const name = "Test Bookmark";
-    const hash = generateOrderHash(name);
-    const description = `[LW:O:{"${hash}":"2"}]`;
-
-    const result = ensureOrderToken(description, name, 2);
-    expect(result.tokenUpdated).toBe(false);
-    expect(result.description).toBe(description);
-  });
-
-  it("should update token if name changed", () => {
-    const oldName = "Old Name";
-    const newName = "New Name";
-    const oldHash = generateOrderHash(oldName);
-    const description = `[LW:O:{"${oldHash}":"2"}]`;
-
-    const result = ensureOrderToken(description, newName, 2);
-    expect(result.tokenUpdated).toBe(true);
-    expect(result.description).not.toContain(oldHash);
-  });
-
-  it("should update token if index changed", () => {
-    const name = "Test Bookmark";
-    const hash = generateOrderHash(name);
-    const description = `[LW:O:{"${hash}":"2"}]`;
-
-    const result = ensureOrderToken(description, name, 5);
-    expect(result.tokenUpdated).toBe(true);
-    expect(result.description).toMatch(/:"5"\}/);
-  });
-
-  it("should preserve user content when updating", () => {
-    const name = "Test";
-    const hash = generateOrderHash(name);
-    const description = `User content [LW:O:{"${hash}":"2"}]`;
-
-    const result = ensureOrderToken(description, name, 3);
-    expect(result.description).toContain("User content");
-    expect(result.tokenUpdated).toBe(true);
-  });
-});
-
-describe("Integration: Token Lifecycle", () => {
-  it("should handle full token lifecycle", () => {
-    // 1. Create token
-    const name = "My Bookmark";
-    let description = appendOrderToken("My Bookmark", name, 0);
-    expect(description).toMatch(/\[LW:O:\{.+\}\]/);
-
-    // 2. Verify token
-    const info = getTokenInfo(description, name);
-    expect(info?.hasToken).toBe(true);
-    expect(info?.hashValid).toBe(true);
-
-    // 3. Simulate rename
-    const newName = "Renamed Bookmark";
-    const updated = ensureOrderToken(description, newName, 0);
-    expect(updated.tokenUpdated).toBe(true);
-
-    // 4. Verify new token
-    const newInfo = getTokenInfo(updated.description, newName);
-    expect(newInfo?.hashValid).toBe(true);
-    expect(newInfo?.index).toBe(0);
   });
 });

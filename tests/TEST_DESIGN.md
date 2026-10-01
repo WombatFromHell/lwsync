@@ -1,381 +1,246 @@
 # Test Suite Design Document
 
-**Status:** ✅ Complete | **Tests:** 122 passing | **Runtime:** ~30s
+**Status:** ✅ Current | **Framework:** Bun test (`bun:test`) | **Layers:** Unit + E2E (integration embedded)
 
-Comprehensive test suite for Linkwarden sync extension using Bun test runner.
+Test suite for Linkwarden sync extension. This document covers test architecture, methodology, and conventions — not test counts (run `bun test` for those).
 
 ---
 
 ## 1. Overview
 
-| Metric          | Value                                  |
-| --------------- | -------------------------------------- |
-| **Total Tests** | 122                                    |
-| **Test Files**  | 6                                      |
-| **Framework**   | Bun test (`bun:test`)                  |
-| **Coverage**    | Unit + Integration + E2E + Performance |
-| **Pass Rate**   | 100%                                   |
-| **Runtime**     | ~30 seconds                            |
-
-**Note:** Test count verified: `bun test` reports 122 tests across 6 files (as of 2026-03-06).
+| Aspect             | Value                                             |
+| ------------------ | ------------------------------------------------- |
+| **Framework**      | Bun test (`bun:test`)                             |
+| **Layers**         | Unit (no mocks) + E2E (real server, mock browser) |
+| **Integration**    | Embedded in E2E files (mock API sections)         |
+| **E2E dependency** | Live Linkwarden instance via `.env`               |
 
 **Run Commands:**
 
 ```bash
-bun test                                    # All tests (122 tests, ~30s)
-bun test tests/sync.test.ts                 # Unit: pure functions (28 tests, ~1s)
-bun test tests/item-order-token.test.ts     # Unit: order tokens (32 tests, ~1s)
-bun test tests/smoke.test.ts                # E2E: basic scenarios (~10s)
-bun test tests/e2e-advanced.test.ts         # E2E: advanced scenarios (~15s)
-bun test tests/performance/                 # Performance tests (13 tests, ~5s)
+bun test                          # All tests
+bun test tests/sync.test.ts       # Unit: sync engine pure functions
+bun test tests/item-order-token.test.ts  # Unit: order tokens
+bun test tests/bookmarks.test.ts  # Unit: bookmarks wrapper
+bun test tests/smoke.test.ts      # E2E: basic scenarios
+bun test tests/e2e-advanced.test.ts    # E2E: advanced scenarios
 ```
 
-**Test Configuration:**
+**E2E Environment** (from `.env`):
 
-E2E tests use environment variables from `.env`:
+- `ENDPOINT` — Linkwarden server URL
+- `API_KEY` — API access token
+- `TEST_COLLECTION` — target collection ID (default: 114 "Unorganized")
 
-- `ENDPOINT` - Linkwarden server URL
-- `API_KEY` - API access token
-- `TEST_COLLECTION` - Target collection ID (default: 114)
+E2E describes skip cleanly when `ENDPOINT`/`API_KEY` are unset, so the suite always runs in CI without credentials (E2E sections are skipped, unit + mock sections run).
 
 ---
 
 ## 2. Test Philosophy
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Test Pyramid                                  │
-│                                                                  │
-│                    ╱─────────╲                                  │
-│                   ╱   E2E     ╲                                 │
-│                  ╱  (18 tests) ╲                                │
-│                 ╱───────────────╲                               │
-│                ╱   Integration   ╲                              │
-│               ╱    (62 tests)    ╲                             │
-│              ╱─────────────────────╲                            │
-│             ╱      Unit Tests       ╲                           │
-│            ╱      (81 tests)        ╲                          │
-│           ╱───────────────────────────╲                         │
-│          ╱                             ╲                        │
-│         ╱───────────────────────────────╲                       │
-│        │  Fast │ Deterministic │ Isolated │                    │
-│         ╲───────────────────────────────╱                       │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+**Golden Rule:** Never mock the system under test. Only mock browser APIs that don't exist in the test environment (`chrome.*`). `SyncEngine` and the real `LinkwardenAPI` always run for real; the Linkwarden server is real in E2E and in-memory in the mock sections.
+
+### Test Pyramid
+
+```mermaid
+flowchart TD
+    subgraph E2E["E2E — smoke.test.ts, e2e-advanced.test.ts"]
+        direction TB
+        E2E1["Real Linkwarden server + real SyncEngine"]
+        E2E2["Mock browser APIs (chrome.*)"]
+        E2E1 --- E2E2
+    end
+
+    subgraph Integration["Integration — embedded in E2E files"]
+        direction TB
+        I1["MockLinkwardenAPI + real SyncEngine"]
+        I2["Mock browser APIs (chrome.*)"]
+        I1 --- I2
+    end
+
+    subgraph Unit["Unit — sync, item-order-token, bookmarks"]
+        direction TB
+        U1["Pure functions, no mocks"]
+        U2["Bookmarks wrapper against MockBookmarks"]
+        U1 --- U2
+    end
+
+    E2E --> Integration --> Unit
 ```
 
-**Golden Rule:** Test what users experience.
-
-| Test Type       | Purpose                       | Mock Policy               | Speed |
-| --------------- | ----------------------------- | ------------------------- | ----- |
-| **Unit**        | Pure functions, deterministic | No mocks                  | ~1s   |
-| **Integration** | Full sync engine with mocks   | Mock browser APIs         | ~5s   |
-| **E2E**         | Real user scenarios           | Real server, mock browser | ~15s  |
+| Layer           | Mock Policy                             | Purpose                                                             |
+| --------------- | --------------------------------------- | ------------------------------------------------------------------- |
+| **Unit**        | None (or `MockBookmarks` only)          | Core logic in isolation: checksums, conflicts, tokens, path parsing |
+| **Integration** | Mock browser APIs + `MockLinkwardenAPI` | Full sync engine without a server; fast, deterministic              |
+| **E2E**         | Mock browser APIs only                  | Real user scenarios against a live Linkwarden instance              |
 
 **Rationale:**
 
-- Unit tests verify core logic in isolation (checksums, conflicts, tokens)
-- Integration tests verify sync engine with mocked external dependencies
-- E2E tests verify actual user experience with real Linkwarden server
 - Minimal mocking reduces maintenance and increases confidence
+- Integration tests are embedded in the E2E files (a "Mock API" `describe` block per file) rather than in a separate file, because they share the same setup/teardown shape
+- E2E validates things no mock can: search-index lag, server timestamps, pagination, auth
 
 ---
 
-## 3. Test Suite Structure
+## 3. Suite Structure
 
-```
-tests/
-├── fixtures/                 # Test data factories (8 files)
-│   ├── index.ts              # Barrel exports
-│   ├── mapping.ts            # createMapping(), createCollectionMapping()
-│   ├── metadata.ts           # createSyncMetadata()
-│   ├── change.ts             # createChange(), updateChange(), deleteChange()
-│   ├── collection.ts         # createCollection(), createSubcollection()
-│   ├── link.ts               # createLink(), createLinkWithDetails()
-│   ├── bookmark.ts           # createBookmark(), createBookmarkFolder()
-│   └── comparison.ts         # createSyncComparison()
-├── mocks/                    # Mock implementations (5 files)
-│   ├── index.ts              # Barrel exports
-│   ├── storage.ts            # MockStorage (in-memory chrome.storage)
-│   ├── bookmarks.ts          # MockBookmarks (in-memory tree)
-│   ├── browser.ts            # setupBrowserMocks(), cleanupBrowserMocks()
-│   └── linkwarden.ts         # MockLinkwardenAPI (in-memory API)
-├── utils/                    # Test utilities (4 files)
-│   ├── index.ts              # Barrel exports
-│   ├── generators.ts         # uniqueId(), uniqueUrl(), timestamp()
-│   ├── test-cleanup.ts       # cleanupServerResources(), enhancedCleanup()
-│   └── config.ts             # getTestCollectionId()
-├── sync.test.ts              # Unit: sync functions (28 tests)
-├── item-order-token.test.ts  # Unit: order tokens (32 tests)
-├── smoke.test.ts             # E2E: basic scenarios (~10s)
-├── e2e-advanced.test.ts      # E2E: advanced scenarios (~15s)
-└── performance/              # Performance tests
-    ├── parallel.test.ts      # Parallel operations (~5s)
-    └── caching.test.ts       # Caching & batch operations (~5s)
-```
+```mermaid
+flowchart LR
+    subgraph Tests["tests/"]
+        direction TB
+        S["sync.test.ts<br/>Unit: checksums, conflicts,<br/>move tokens, path parsing"]
+        O["item-order-token.test.ts<br/>Unit: order token utilities"]
+        B["bookmarks.test.ts<br/>Unit: browser root folder<br/>resolution (Chrome re-ID bug)"]
+        SM["smoke.test.ts<br/>Integration (mock API) +<br/>E2E (real API)"]
+        A["e2e-advanced.test.ts<br/>E2E: conflicts, order,<br/>subcollections, bulk ops"]
+    end
 
-**Note:** Storage functionality is tested through integration tests embedded in E2E files and through performance tests.
+    subgraph Mocks["tests/mocks/"]
+        direction TB
+        MS["storage.ts<br/>MockStorage"]
+        MB["bookmarks.ts<br/>MockBookmarks"]
+        MR["browser.ts<br/>setupBrowserMocks()<br/>cleanupBrowserMocks()"]
+        ML["linkwarden.ts<br/>MockLinkwardenAPI"]
+    end
 
-### 3.1 Test Distribution
+    subgraph Utils["tests/utils/"]
+        direction TB
+        UC["config.ts<br/>getTestCollectionId()"]
+        UG["generators.ts<br/>timestamp()"]
+        UT["test-cleanup.ts<br/>cleanupServerResources()<br/>enhancedCleanup()"]
+    end
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                 Test Suite (122 tests)                        │
-├──────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌────────────────────┐  ┌────────────────────────────────┐  │
-│  │   Unit Tests       │  │   Integration + E2E            │  │
-│  │   (60 tests)       │  │   (62 tests)                   │  │
-│  │   ~3 seconds       │  │   ~27 seconds                  │  │
-│  ├────────────────────┤  ├────────────────────────────────┤  │
-│  │ sync.test.ts       │  │ smoke.test.ts                  │  │
-│  │ • Checksums (5)    │  │ • Basic sync flows             │  │
-│  │ • Conflicts (6)    │  │ • Search index lag handling    │  │
-│  │ • Move tokens (15) │  │ • Orphan cleanup               │  │
-│  │ • Path parsing (2) │  │                                │  │
-│  │                    │  │ e2e-advanced.test.ts           │  │
-│  │ item-order-token   │  │ • Conflict resolution (LWW)    │  │
-│  │ • Hash gen (6)     │  │ • Order preservation           │  │
-│  │ • Token format (7) │  │ • Subcollection sync           │  │
-│  │ • Token parse (7)  │  │ • Bulk operations              │  │
-│  │ • Token utils (12) │  │                                │  │
-│  │                    │  │ performance/                   │  │
-│  │ performance/       │  │ • Parallel operations          │  │
-│  │ • Parallel ops     │  │ • Caching & batch ops          │  │
-│  │                    │  │                                │  │
-│  └────────────────────┘  └────────────────────────────────┘  │
-│                                                               │
-└──────────────────────────────────────────────────────────────┘
+    SM --> MB
+    SM --> ML
+    A --> MB
+    B --> MB
+    MR --> MS
+    MR --> MB
+    SM --> UT
+    A --> UT
+    SM --> UC
+    A --> UC
 ```
 
-**Note:** Test counts are approximate. Run `bun test` for exact counts. The test suite includes unit tests, integration tests, E2E tests, and performance tests. Integration tests are embedded within E2E test files (smoke.test.ts and e2e-advanced.test.ts) rather than in a separate file.
+Test data helpers (e.g. `createMapping()`) live inline in the test files that use them — there is no shared fixtures module.
 
 ---
 
 ## 4. Test Infrastructure
 
-### 4.1 Factories (`tests/fixtures/`)
+### 4.1 Browser Mocks (`tests/mocks/`)
 
-Reusable test data creation with sensible defaults:
+`setupBrowserMocks()` installs in-memory implementations onto `globalThis.chrome`, so production source code (which calls `chrome.*` in callback style) runs unmodified:
 
-| Factory      | Functions                                            | Example                                     |
-| ------------ | ---------------------------------------------------- | ------------------------------------------- |
-| `mapping`    | `createMapping()`, `createCollectionMapping()`       | `createMapping({ linkwardenId: 1 })`        |
-| `metadata`   | `createSyncMetadata()`                               | `createSyncMetadata({ lastSyncTime: 0 })`   |
-| `change`     | `createChange()`, `updateChange()`, `deleteChange()` | `createChange({ type: "create" })`          |
-| `collection` | `createCollection()`, `createSubcollection()`        | `createCollection({ name: "Test" })`        |
-| `link`       | `createLink()`, `createLinkWithDetails()`            | `createLink(1, { url: "https://..." })`     |
-| `bookmark`   | `createBookmark()`, `createBookmarkFolder()`         | `createBookmark({ title: "Test" })`         |
-| `comparison` | `createSyncComparison()`                             | `createSyncComparison({ syncedCount: 10 })` |
+```mermaid
+flowchart LR
+    Setup["setupBrowserMocks()"] --> G["globalThis.chrome"]
+    G --> SL["chrome.storage.local<br/>(MockStorage)"]
+    G --> BK["chrome.bookmarks<br/>(MockBookmarks)"]
+    G --> RT["chrome.runtime<br/>(MockRuntime)"]
 
-**Example:**
-
-```typescript
-import { createMapping } from "./fixtures/mapping";
-import { createSyncMetadata } from "./fixtures/metadata";
-
-const mapping = createMapping({
-  linkwardenId: 1,
-  browserId: "bookmark-1",
-  checksum: "abc123",
-});
-
-const metadata = createSyncMetadata({
-  lastSyncTime: 0,
-  targetCollectionId: 1,
-});
+    SRC["src/ modules<br/>(storage, bookmarks, sync)"] --> G
+    TST["test files"] --> SRC
+    TST -.->|inspects state| SL
+    TST -.->|inspects state| BK
 ```
 
-### 4.2 Mocks (`tests/mocks/`)
+| Mock         | Class / Function                                | Description                                                                                                                                        |
+| ------------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `storage`    | `MockStorage`                                   | In-memory `chrome.storage.local`                                                                                                                   |
+| `bookmarks`  | `MockBookmarks`                                 | In-memory bookmark tree; fires `onCreated`/`onChanged`/`onRemoved`/`onMoved` like the real API; dual callback+promise return style matching Chrome |
+| `browser`    | `setupBrowserMocks()` / `cleanupBrowserMocks()` | Install/remove all browser mocks                                                                                                                   |
+| `linkwarden` | `MockLinkwardenAPI`                             | In-memory Linkwarden API (collections, links, trees)                                                                                               |
 
-In-memory implementations of browser APIs:
+Every test file follows the same lifecycle:
 
-| Mock         | Class                 | Description                         |
-| ------------ | --------------------- | ----------------------------------- |
-| `storage`    | `MockStorage`         | In-memory `chrome.storage.local`    |
-| `bookmarks`  | `MockBookmarks`       | In-memory bookmark tree with events |
-| `browser`    | `setupBrowserMocks()` | Install/remove all browser mocks    |
-| `linkwarden` | `MockLinkwardenAPI`   | In-memory Linkwarden API            |
+```mermaid
+sequenceDiagram
+    participant T as Test
+    participant M as Browser Mocks
+    participant S as SyncEngine
+    participant API as Linkwarden (real or mock)
+    participant C as Cleanup
 
-**Example:**
-
-```typescript
-import { setupBrowserMocks, cleanupBrowserMocks } from "./mocks/browser";
-import { MockLinkwardenAPI } from "./mocks/linkwarden";
-
-let mocks: ReturnType<typeof setupBrowserMocks>;
-let mockApi: MockLinkwardenAPI;
-
-beforeEach(() => {
-  mocks = setupBrowserMocks();
-  mockApi = new MockLinkwardenAPI();
-});
-
-afterEach(() => {
-  cleanupBrowserMocks();
-});
+    T->>M: setupBrowserMocks()
+    T->>S: new SyncEngine(api)
+    T->>S: sync()
+    S->>API: read/write links & collections
+    S->>M: read/write bookmarks & storage
+    T->>T: assert state (mappings, bookmarks, server)
+    T->>C: delete tracked server resources
+    T->>M: storage.clearAll() + cleanupBrowserMocks()
 ```
 
-### 4.3 Utilities (`tests/utils/`)
+### 4.2 Utilities (`tests/utils/`)
 
-Common test helpers:
+| Utility        | Functions                                                                | Purpose                                |
+| -------------- | ------------------------------------------------------------------------ | -------------------------------------- |
+| `config`       | `getTestCollectionId()`, `getTestCollectionName()`                       | Read `.env`-driven test configuration  |
+| `generators`   | `timestamp(offset?)`                                                     | Time utilities                         |
+| `test-cleanup` | `createTestResources()`, `cleanupServerResources()`, `enhancedCleanup()` | Track and delete server-side test data |
 
-| Utility        | Functions                                          | Description               |
-| -------------- | -------------------------------------------------- | ------------------------- |
-| `generators`   | `uniqueId()`, `uniqueUrl()`, `uniqueTitle()`       | Generate unique test data |
-| `generators`   | `timestamp()`, `isoTimestamp()`, `pastTimestamp()` | Time utilities            |
-| `test-cleanup` | `cleanupServerResources()`, `enhancedCleanup()`    | Clean up test state       |
-| `config`       | `getTestCollectionId()`                            | Test configuration        |
-
-**Example:**
-
-```typescript
-import { uniqueUrl, uniqueTitle, timestamp } from "./utils/generators";
-
-const url = uniqueUrl(); // "https://test-123456-abc123.example.com"
-const title = uniqueTitle(); // "Test 1234567890"
-const now = timestamp(); // Current timestamp
-const past = timestamp(-60000); // 1 minute ago
-```
+**Resource tracking:** E2E tests collect every server-side ID they create into a `TestResources` object and delete tracked resources in `afterEach`. `enhancedCleanup()` additionally scans the collection for untracked links matching known test URL patterns (used where a test may leak resources on failure).
 
 ---
 
 ## 5. Test Files
 
-### 5.1 `sync.test.ts` - Unit Tests (28 tests)
+### 5.1 `sync.test.ts` — Unit
 
-**Purpose:** Test pure sync functions in isolation.
+Pure sync functions, no mocks.
 
-| Function             | Tests | Purpose                              |
-| -------------------- | ----- | ------------------------------------ |
-| `computeChecksum()`  | 5     | Hash generation for change detection |
-| `resolveConflict()`  | 6     | LWW conflict resolution logic        |
-| `appendMoveToken()`  | 3     | Token creation for folder moves      |
-| `extractMoveToken()` | 6     | Token parsing from descriptions      |
-| `removeMoveToken()`  | 6     | Token cleanup after moves            |
-| `parseFolderPath()`  | 2     | Path string → array parsing          |
+| Area                | Functions                                                                    |
+| ------------------- | ---------------------------------------------------------------------------- |
+| Checksums           | `computeChecksum()`                                                          |
+| Conflict resolution | `resolveConflict()` (LWW: no-op / use-remote / use-local, browser wins ties) |
+| Move tokens         | `appendMoveToken()`, `extractMoveToken()`, `removeMoveToken()`               |
+| Path parsing        | `parseFolderPath()`                                                          |
 
-**Mock Policy:** None - pure functions only.
+### 5.2 `item-order-token.test.ts` — Unit
 
-**Example:**
+Order token utilities, no mocks.
 
-```typescript
-test("returns use-remote when remote is newer", () => {
-  const mapping = createMapping({
-    linkwardenUpdatedAt: 1000,
-    browserUpdatedAt: 2000,
-  });
-  const remote = {
-    name: "Test",
-    url: "https://example.com",
-    updatedAt: new Date(3000).toISOString(),
-  };
-  const result = resolveConflict(mapping, remote);
-  expect(result).toBe("use-remote");
-});
-```
+| Area          | Functions                                                                             |
+| ------------- | ------------------------------------------------------------------------------------- |
+| Hashing       | `generateOrderHash()` (8-char lowercase hex), `verifyOrderHash()`                     |
+| Tokens        | `formatOrderToken()`, `parseOrderToken()`, `removeOrderToken()`, `appendOrderToken()` |
+| Introspection | `getTokenInfo()` (hasToken / hashValid / needsUpdate)                                 |
 
----
+### 5.3 `bookmarks.test.ts` — Unit
 
-### 5.2 `item-order-token.test.ts` - Unit Tests (32 tests)
+Browser root folder resolution (`src/bookmarks.ts`), against `MockBookmarks`.
 
-**Purpose:** Test order token utilities.
+Covers the Chrome/Edge bookmark re-ID bug (crbug 456225717): the Bookmarks bar may no longer have ID `"1"` after a profile re-ID, so the root is resolved by tree position, not hard-coded ID, and throws when no root folders exist.
 
-| Function              | Tests | Purpose                             |
-| --------------------- | ----- | ----------------------------------- |
-| `generateOrderHash()` | 6     | DJB2 hash generation (8 hex chars)  |
-| `formatOrderToken()`  | 4     | Token string formatting             |
-| `parseOrderToken()`   | 7     | Token parsing with validation       |
-| `extractOrderToken()` | 3     | Extract token from description      |
-| `removeOrderToken()`  | 4     | Remove token, preserve user content |
-| `appendOrderToken()`  | 4     | Append/update token in description  |
-| `verifyOrderHash()`   | 2     | Validate hash matches name          |
-| `getTokenInfo()`      | 2     | Get token info with validation      |
+### 5.4 `smoke.test.ts` — Integration + E2E
 
-**Mock Policy:** None - pure functions only.
+Core sync functionality, in two sections:
 
-**Example:**
+**Mock API section** (no server needed):
 
-```typescript
-test("should generate consistent hash for same name", () => {
-  const hash1 = generateOrderHash("Test Bookmark");
-  const hash2 = generateOrderHash("Test Bookmark");
-  expect(hash1).toBe(hash2);
-  expect(hash1.length).toBe(8);
-  expect(hash1).toMatch(/^[a-f0-9]{8}$/);
-});
-```
+- Search-index lag must not delete freshly created bookmarks (regression test)
+- Bookmark creation → server link → lag scenario
+- Orphan cleanup works when the search index returns data
 
----
+**Real API section** (skipped without credentials):
 
-### 5.3 `smoke.test.ts` - E2E Tests (~10s)
+- Server link creation + lag resilience
+- Client-side deletion propagates to server
+- No duplicate links on create + quick rename
+- Server-to-client resync into an empty folder
+- Server-side deletion and orphan handling (0-links safety check)
 
-**Purpose:** Verify core sync functionality with real server.
+### 5.5 `e2e-advanced.test.ts` — E2E
 
-**Test Categories:**
+Complex scenarios against a live server:
 
-| Category     | Tests | Description                          |
-| ------------ | ----- | ------------------------------------ |
-| **Mock API** | 3     | Fast tests without server dependency |
-| **Real API** | 7     | Full E2E with real Linkwarden        |
-
-**What's Tested:**
-
-1. ✅ Search index lag handling (bug fix verification)
-2. ✅ Bookmark creation → server sync
-3. ✅ Orphan cleanup (server delete → client)
-4. ✅ Rename propagation
-5. ✅ Duplicate prevention
-6. ✅ Client-side deletion
-7. ✅ Server-side deletion
-8. ✅ Server-to-client resync
-
----
-
-### 5.4 `e2e-advanced.test.ts` - Advanced E2E (~15s)
-
-**Purpose:** Test complex sync scenarios against real server.
-
-| Category                | Tests | Description                           |
-| ----------------------- | ----- | ------------------------------------- |
-| **Conflict Resolution** | 2     | LWW strategy, simultaneous changes    |
-| **Order Preservation**  | 2     | Bookmark reorder, restore from server |
-| **Subcollection Sync**  | 2     | Nested folder structure               |
-| **Bulk Operations**     | 2     | Bulk create/delete performance        |
-
-**What's Tested:**
-
-1. ✅ Conflict resolution (LWW)
-2. ✅ Simultaneous server/client changes
-3. ✅ Bookmark order preservation after reorder
-4. ✅ Order restoration from server
-5. ✅ Subcollection structure sync
-6. ✅ Nested subcollections (3 levels)
-7. ✅ Bulk bookmark creation (10 items)
-8. ✅ Bulk bookmark deletion
-
----
-
-### 5.5 `performance/parallel.test.ts` - Performance Tests (~5s)
-
-**Purpose:** Verify parallel operation performance and concurrency limits.
-
-| Category             | Tests | Description                          |
-| -------------------- | ----- | ------------------------------------ |
-| **Batch Operations** | 3     | Batch vs sequential performance      |
-| **Parallel Sync**    | 4     | Parallel link sync, error handling   |
-| **Cache Building**   | 2     | Parallel cache construction          |
-| **Concurrency**      | 2     | Concurrency limits, mixed operations |
-| **Orphan Cleanup**   | 2     | Set-based lookup performance         |
-
-**What's Tested:**
-
-1. ✅ Batch operation performance
-2. ✅ Parallel vs sequential comparison
-3. ✅ Concurrent API operations
-4. ✅ Concurrency limit enforcement
-5. ✅ Parallel orphan cleanup
-6. ✅ Error handling in parallel operations
+| Category            | Scenarios                                                     |
+| ------------------- | ------------------------------------------------------------- |
+| Conflict resolution | Both sides change; simultaneous server/client changes         |
+| Order preservation  | Browser reorder captured into `browserIndex` and order tokens |
+| Subcollection sync  | Child and nested subcollections become folders with links     |
+| Bulk operations     | Bulk link creation and deletion                               |
 
 ---
 
@@ -387,37 +252,32 @@ test("should generate consistent hash for same name", () => {
 test("should <action> when <condition>", async () => {
   // Test implementation
 });
-
-// Examples:
-test("should create mapping when link is synced");
-test("should skip already synced items with no changes");
-test("should prefer browser changes when browser is newer");
 ```
 
 ### 6.2 Test Structure (AAA Pattern)
 
 ```typescript
 test("should do something", async () => {
-  // Arrange: Set up test data
-  const mapping = createMapping({ linkwardenId: 1 });
-  await storage.upsertMapping(mapping);
+  // Arrange: set up test data
+  await storage.saveSyncMetadata({
+    /* ... */
+  });
 
-  // Act: Execute the code under test
-  const result = await storage.getMappings();
+  // Act: execute the code under test
+  const result = await syncEngine.sync();
 
-  // Assert: Verify the result
-  expect(result.length).toBe(1);
-  expect(result[0].linkwardenId).toBe(1);
+  // Assert: verify the result
+  expect(result.errors).toHaveLength(0);
 });
 ```
 
 ### 6.3 E2E Best Practices
 
-1. **Always cleanup** - Use `afterEach` with `enhancedCleanup()`
-2. **Use unique names** - Include timestamps to avoid conflicts
-3. **Wait for async** - Use `setTimeout` for server processing
-4. **Verify with direct fetch** - Use `api.getLink()` to verify state
-5. **Handle search lag** - Use direct ID fetch as fallback
+1. **Always track and cleanup** — push every created server ID into `resources`; clean up in `afterEach`
+2. **Use unique names** — include `Date.now()` to avoid collisions with other test data
+3. **Wait for async** — Linkwarden has eventual consistency; wait after writes that the search index must see
+4. **Verify with direct fetch** — search can lag; fall back to `api.getLink(id)` from the mapping
+5. **Skip without credentials** — E2E describes must be skippable so the suite runs in CI
 
 **E2E Template:**
 
@@ -426,10 +286,9 @@ test(
   "should do something with real server",
   async () => {
     const testUrl = `https://test-${Date.now()}.example.com`;
-    const testTitle = `Test ${Date.now()}`;
 
     // Create resource on server
-    const link = await api.createLink(testUrl, TEST_COLLECTION_ID, testTitle);
+    const link = await api.createLink(testUrl, TEST_COLLECTION_ID, "Test");
     resources.linkIds.push(link.id); // Track for cleanup
 
     // Perform action
@@ -445,29 +304,27 @@ test(
 
 ---
 
-## 7. Test Coverage Matrix
+## 7. Coverage Matrix
 
-| Feature               | Unit | Integration | E2E |
-| --------------------- | ---- | ----------- | --- |
-| Checksum computation  | ✅   | -           | -   |
-| Conflict resolution   | ✅   | ✅          | ✅  |
-| Move token helpers    | ✅   | -           | -   |
-| Order token utilities | ✅   | -           | -   |
-| Storage CRUD          | ✅   | ✅          | -   |
-| Linkwarden API        | -    | ✅          | ✅  |
-| Initial sync          | -    | ✅          | ✅  |
-| Incremental sync      | -    | ✅          | ✅  |
-| Browser → Server      | -    | ✅          | ✅  |
-| Server → Browser      | -    | ✅          | ✅  |
-| Subcollections        | -    | ✅          | ✅  |
-| Folder moves          | -    | ✅          | -   |
-| Duplicate handling    | -    | ✅          | ✅  |
-| Error handling        | -    | ✅          | ✅  |
-| Bookmark scanner      | -    | ✅          | ✅  |
-| Performance (bulk)    | -    | -           | ✅  |
-| Order preservation    | -    | ✅          | ✅  |
-| Search index lag      | -    | -           | ✅  |
-| Orphan cleanup        | -    | ✅          | ✅  |
+| Feature                   | Unit | Integration | E2E |
+| ------------------------- | ---- | ----------- | --- |
+| Checksum computation      | ✅   | -           | -   |
+| Conflict resolution (LWW) | ✅   | ✅          | ✅  |
+| Move token helpers        | ✅   | -           | -   |
+| Order token utilities     | ✅   | -           | -   |
+| Browser root resolution   | ✅   | -           | -   |
+| Linkwarden API            | -    | ✅          | ✅  |
+| Initial sync              | -    | ✅          | ✅  |
+| Incremental sync          | -    | ✅          | ✅  |
+| Browser → Server          | -    | ✅          | ✅  |
+| Server → Browser          | -    | ✅          | ✅  |
+| Subcollections            | -    | -           | ✅  |
+| Duplicate handling        | -    | -           | ✅  |
+| Error handling            | -    | ✅          | ✅  |
+| Order preservation        | -    | -           | ✅  |
+| Search index lag          | -    | ✅          | ✅  |
+| Orphan cleanup            | -    | ✅          | ✅  |
+| Bulk operations           | -    | -           | ✅  |
 
 ---
 
@@ -491,27 +348,30 @@ jobs:
         run: bun install
       - name: Run quality checks
         run: bun run quality
-      - name: Run unit tests
-        run: bun test tests/*.test.ts --exclude 'tests/smoke.test.ts' --exclude 'tests/e2e-advanced.test.ts'
-      - name: Run E2E tests
-        run: bun test tests/smoke.test.ts tests/e2e-advanced.test.ts
-        env:
-          ENDPOINT: ${{ secrets.LINKWARDEN_URL }}
-          API_KEY: ${{ secrets.LINKWARDEN_TOKEN }}
-          TEST_COLLECTION: ${{ secrets.TEST_COLLECTION_ID }}
+      - name: Run unit + mock tests
+        run: bun test
+        # E2E describes skip automatically when credentials are absent
+```
+
+When E2E credentials are available as secrets, the same `bun test` run exercises the live server:
+
+```yaml
+- name: Run E2E tests
+  run: bun test tests/smoke.test.ts tests/e2e-advanced.test.ts
+  env:
+    ENDPOINT: ${{ secrets.LINKWARDEN_URL }}
+    API_KEY: ${{ secrets.LINKWARDEN_TOKEN }}
+    TEST_COLLECTION: ${{ secrets.TEST_COLLECTION_ID }}
 ```
 
 ### Local Development
 
 ```bash
 # Quick feedback (unit only)
-bun test tests/sync.test.ts tests/item-order-token.test.ts
+bun test tests/sync.test.ts tests/item-order-token.test.ts tests/bookmarks.test.ts
 
 # Before commit
 bun run quality && bun test
-
-# Full validation
-bun test                            # All tests (~30s)
 ```
 
 ---
@@ -520,11 +380,13 @@ bun test                            # All tests (~30s)
 
 ### E2E Tests Failing
 
-| Problem            | Solution                                           |
-| ------------------ | -------------------------------------------------- |
-| Connection errors  | Check `.env` credentials, verify server accessible |
-| Tests timeout      | Increase `TEST_TIMEOUT`, check server performance  |
-| Orphaned test data | Run `enhancedCleanup()` manually                   |
+| Problem              | Solution                                                      |
+| -------------------- | ------------------------------------------------------------- |
+| Connection errors    | Check `.env` credentials, verify server accessible            |
+| Auth errors (401)    | Token expired — refresh `API_KEY` in `.env`                   |
+| Tests timeout        | Increase `TEST_TIMEOUT`, check server performance             |
+| Orphaned test data   | `enhancedCleanup()` scans for untracked test links on cleanup |
+| Search misses a link | Expected lag — verify via `api.getLink(id)` instead           |
 
 ### Mock Tests Failing
 
@@ -536,43 +398,5 @@ bun test                            # All tests (~30s)
 
 ---
 
-## 10. Summary
-
-| Metric                   | Value           |
-| ------------------------ | --------------- |
-| **Total Tests**          | 122             |
-| **Unit Tests**           | 60 (49%)        |
-| **Integration Tests**    | Embedded in E2E |
-| **E2E Tests**            | 18              |
-| **Performance Tests**    | 13              |
-| **Pass Rate**            | 100%            |
-| **Runtime**              | ~30s            |
-| **Test Files**           | 6               |
-| **Infrastructure Files** | 17              |
-
-**Key Strengths:**
-
-1. ✅ **Comprehensive coverage** - Unit + Integration + E2E + Performance
-2. ✅ **Fast feedback** - Unit tests run in ~3s
-3. ✅ **Real-world validation** - E2E tests with actual server
-4. ✅ **Performance verified** - Parallel operations tested
-5. ✅ **Maintainable** - Factories, mocks, utilities reduce duplication
-6. ✅ **Reliable cleanup** - Enhanced cleanup prevents orphaned data
-
-**Test Files:**
-
-| File                           | Tests | Type        | Runtime |
-| ------------------------------ | ----- | ----------- | ------- |
-| `sync.test.ts`                 | 28    | Unit        | ~1s     |
-| `item-order-token.test.ts`     | 32    | Unit        | ~1s     |
-| `smoke.test.ts`                | 10    | E2E         | ~10s    |
-| `e2e-advanced.test.ts`         | 8     | E2E         | ~15s    |
-| `performance/parallel.test.ts` | 13    | Performance | ~5s     |
-| `performance/caching.test.ts`  | 13    | Performance | ~5s     |
-
-**Note:** Integration tests are embedded within the smoke.test.ts and e2e-advanced.test.ts files, using mocked browser APIs with real or mocked Linkwarden API depending on the test section.
-
----
-
-**Last Updated:** March 2026  
-**Version:** 1.0.0
+**Last Updated:** 2026-03-06
+**Version:** 2.0.0

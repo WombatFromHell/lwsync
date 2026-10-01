@@ -29,13 +29,16 @@ export class RemoteSync {
   private errors: SyncErrorReporter;
   private collectionSync: CollectionSync;
 
+  private cache: MappingMap;
+
   constructor(
     api: LinkwardenAPI,
-    errorReporter?: SyncErrorReporter,
-    cache?: MappingMap
+    errorReporter: SyncErrorReporter,
+    cache: MappingMap
   ) {
     this.api = api;
-    this.errors = errorReporter || new SyncErrorReporter();
+    this.errors = errorReporter;
+    this.cache = cache;
     this.collectionSync = new CollectionSync(this.api, this.errors, cache);
   }
 
@@ -269,7 +272,8 @@ export class RemoteSync {
     browserRootFolderId: string
   ): Promise<void> {
     const orphanCleanup = new (await import("./orphans")).OrphanCleanup(
-      this.errors
+      this.errors,
+      this.cache
     );
 
     // Pass IDs to appropriate parameter based on type
@@ -289,12 +293,5 @@ export class RemoteSync {
 
     // Normalize indices after deletions
     await orphanCleanup.normalizeIndices(browserRootFolderId);
-  }
-
-  /**
-   * Get the error reporter for this instance
-   */
-  getErrorReporter(): SyncErrorReporter {
-    return this.errors;
   }
 }

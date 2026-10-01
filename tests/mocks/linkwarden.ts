@@ -72,59 +72,6 @@ export class MockLinkwardenAPI implements Partial<LinkwardenAPI> {
   }
 
   /**
-   * Create a collection with a specific ID
-   * @deprecated Use createCollection() with default collection ID from config instead
-   */
-  createCollectionWithId(
-    id: number,
-    name: string,
-    parentId?: number
-  ): Promise<LinkwardenCollection> {
-    const now = new Date().toISOString();
-
-    const collection: MockCollectionData = {
-      id,
-      name,
-      parentId,
-      description: "",
-      color: "",
-      isPublic: false,
-      ownerId: 1,
-      links: [],
-      collections: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.collections.set(id, collection);
-
-    // Add to parent's collections array
-    if (parentId) {
-      const parent = this.collections.get(parentId);
-      if (parent) {
-        if (!parent.collections) {
-          parent.collections = [];
-        }
-        parent.collections.push({ id, name, updatedAt: now });
-      }
-    }
-
-    // Update nextId to avoid conflicts
-    if (id >= this.nextId) {
-      this.nextId = id + 1;
-    }
-
-    return Promise.resolve(this.toCollection(collection));
-  }
-
-  /**
-   * Get a collection by ID (internal, returns raw data)
-   */
-  private getCollectionData(id: number): MockCollectionData | undefined {
-    return this.collections.get(id);
-  }
-
-  /**
    * Convert internal collection to public type
    */
   private toCollection(
@@ -169,33 +116,6 @@ export class MockLinkwardenAPI implements Partial<LinkwardenAPI> {
   }
 
   /**
-   * Get a collection by ID
-   */
-  async getCollection(id: number): Promise<LinkwardenCollection> {
-    const collection = this.collections.get(id);
-    if (!collection) {
-      throw new Error(`Collection ${id} not found`);
-    }
-    return this.toCollection(collection);
-  }
-
-  /**
-   * Get collection tree (recursively fetch subcollections)
-   */
-  async getCollectionTree(id: number): Promise<LinkwardenCollection> {
-    return this.getCollection(id);
-  }
-
-  /**
-   * Get all collections
-   */
-  async getCollections(): Promise<LinkwardenCollection[]> {
-    return Array.from(this.collections.values()).map((c) =>
-      this.toCollection(c)
-    );
-  }
-
-  /**
    * Create a new collection
    */
   async createCollection(
@@ -236,13 +156,30 @@ export class MockLinkwardenAPI implements Partial<LinkwardenAPI> {
   }
 
   /**
-   * Create a subcollection (convenience method for tests)
+   * Get a collection by ID
    */
-  async createSubcollection(
-    name: string,
-    parentId: number
-  ): Promise<LinkwardenCollection> {
-    return this.createCollection(name, parentId);
+  async getCollection(id: number): Promise<LinkwardenCollection> {
+    const collection = this.collections.get(id);
+    if (!collection) {
+      throw new Error(`Collection ${id} not found`);
+    }
+    return this.toCollection(collection);
+  }
+
+  /**
+   * Get collection tree (recursively fetch subcollections)
+   */
+  async getCollectionTree(id: number): Promise<LinkwardenCollection> {
+    return this.getCollection(id);
+  }
+
+  /**
+   * Get all collections
+   */
+  async getCollections(): Promise<LinkwardenCollection[]> {
+    return Array.from(this.collections.values()).map((c) =>
+      this.toCollection(c)
+    );
   }
 
   /**
@@ -478,27 +415,6 @@ export class MockLinkwardenAPI implements Partial<LinkwardenAPI> {
   }
 
   /**
-   * Search for a collection by name
-   */
-  async searchCollectionByName(
-    name: string
-  ): Promise<LinkwardenCollection | undefined> {
-    for (const collection of this.collections.values()) {
-      if (collection.name === name) {
-        return this.toCollection(collection);
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * Test connection (always succeeds for mock)
-   */
-  async testConnection(): Promise<boolean> {
-    return true;
-  }
-
-  /**
    * Get links by collection using search endpoint simulation
    * Matches signature of real API: async getLinksByCollection()
    * Handles pagination internally and returns all links
@@ -519,47 +435,6 @@ export class MockLinkwardenAPI implements Partial<LinkwardenAPI> {
   }
 
   /**
-   * Get links by collection with pagination (for testing pagination)
-   */
-  async getLinksByCollectionPaginated(
-    collectionId: number,
-    cursor?: number
-  ): Promise<{ nextCursor?: number | null; links: LinkwardenLink[] }> {
-    const collection = this.collections.get(collectionId);
-    if (!collection) {
-      return { nextCursor: null, links: [] };
-    }
-
-    // Get all links for this collection
-    const allLinks = collection.links
-      .map((l) => this.links.get(l.id))
-      .filter((l): l is MockLinkData => l !== undefined)
-      .map((l) => this.toLink(l));
-
-    // Simulate pagination (50 items per page)
-    const pageSize = 50;
-    const start = cursor || 0;
-    const end = Math.min(start + pageSize, allLinks.length);
-    const paginatedLinks = allLinks.slice(start, end);
-
-    // Calculate next cursor
-    const nextCursor = end < allLinks.length ? end : null;
-
-    return {
-      nextCursor,
-      links: paginatedLinks,
-    };
-  }
-
-  /**
-   * Get all links for a collection (deprecated, use getLinksByCollection)
-   * @deprecated Use getLinksByCollection() instead
-   */
-  async getCollectionLinks(collectionId: number): Promise<LinkwardenLink[]> {
-    return this.getLinksByCollection(collectionId);
-  }
-
-  /**
    * Clear all data and reset to initial state
    */
   clear(): void {
@@ -568,28 +443,5 @@ export class MockLinkwardenAPI implements Partial<LinkwardenAPI> {
     this.nextId = 1;
     this.nextLinkId = 1;
     this.createDefaultCollection();
-  }
-
-  /**
-   * Clear collections (alias for clear, backward compatibility)
-   */
-  clearCollections(): void {
-    this.clear();
-  }
-
-  /**
-   * Get all collections (for assertions)
-   */
-  getAllCollections(): LinkwardenCollection[] {
-    return Array.from(this.collections.values()).map((c) =>
-      this.toCollection(c)
-    );
-  }
-
-  /**
-   * Get all links (for assertions)
-   */
-  getAllLinks(): LinkwardenLink[] {
-    return Array.from(this.links.values()).map((l) => this.toLink(l));
   }
 }

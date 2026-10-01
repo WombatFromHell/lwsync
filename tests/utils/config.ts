@@ -27,31 +27,3 @@ export function getTestCollectionId(): number {
 export function getTestCollectionName(): string {
   return process.env.TEST_COLLECTION_NAME || "Unorganized";
 }
-
-/**
- * Get test timeout in milliseconds
- */
-export function getTestTimeout(): number {
-  const envValue = process.env.TEST_TIMEOUT;
-  if (envValue) {
-    const parsed = parseInt(envValue, 10);
-    if (!isNaN(parsed) && parsed > 0) {
-      return parsed;
-    }
-  }
-  return 15000; // Default: 15 seconds
-}
-
-/**
- * Check if running in CI environment
- */
-export function isCI(): boolean {
-  return process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
-}
-
-/**
- * Check if verbose logging is enabled for tests
- */
-export function isVerbose(): boolean {
-  return process.env.VERBOSE === "true" || process.env.DEBUG === "true";
-}

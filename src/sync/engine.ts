@@ -20,7 +20,6 @@ import { SyncErrorReporter, createErrorContext } from "./errorReporter";
 import { BrowserChangeApplier } from "./browser-changes";
 import { RemoteSync } from "./remote-sync";
 import { SyncInitializer } from "./initialization";
-import { OrphanCleanup } from "./orphans";
 import { SyncComparator } from "./comparator";
 import { createLogger } from "../utils";
 
@@ -120,7 +119,6 @@ export class SyncEngine {
   private browserChanges: BrowserChangeApplier;
   private remoteSync: RemoteSync;
   private initializer: SyncInitializer;
-  private orphans: OrphanCleanup;
   private comparator: SyncComparator;
 
   constructor(api: LinkwardenAPI) {
@@ -135,8 +133,11 @@ export class SyncEngine {
       this.mappingMap
     );
     this.remoteSync = new RemoteSync(this.api, this.errors, this.mappingMap);
-    this.initializer = new SyncInitializer(this.api, this.errors);
-    this.orphans = new OrphanCleanup(this.errors, this.mappingMap);
+    this.initializer = new SyncInitializer(
+      this.api,
+      this.errors,
+      this.mappingMap
+    );
     this.comparator = new SyncComparator(
       this.api,
       this.errors,
@@ -414,15 +415,6 @@ export class SyncEngine {
   }
 
   /**
-   * Find or create a collection (used by tests)
-   */
-  async findOrCreateCollection(
-    name: string
-  ): Promise<{ id: number; name: string } | null> {
-    return await this.initializer.findOrCreateCollection(name);
-  }
-
-  /**
    * Compare browser bookmarks with server links
    * Returns detailed report of sync status
    */
@@ -441,30 +433,5 @@ export class SyncEngine {
     await storage.clearAll();
     await chrome.alarms.clear("lwsync-sync");
     logger.info("Sync reset complete");
-  }
-
-  /**
-   * Cleanup orphaned mappings
-   */
-  async cleanupOrphans(
-    remoteLinkIds: Set<number>,
-    remoteCollectionIds: Set<number>,
-    browserRootFolderId: string
-  ): Promise<void> {
-    await this.orphans.cleanupOrphanedMappings(
-      remoteLinkIds,
-      remoteCollectionIds,
-      browserRootFolderId
-    );
-
-    // Normalize indices after deletions
-    await this.orphans.normalizeIndices(browserRootFolderId);
-  }
-
-  /**
-   * Get the error reporter for this instance
-   */
-  getErrorReporter(): SyncErrorReporter {
-    return this.errors;
   }
 }

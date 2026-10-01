@@ -48,13 +48,6 @@ export function now(): number {
   return Date.now();
 }
 
-/**
- * Get ISO timestamp string
- */
-export function isoTimestamp(offset = 0): string {
-  return new Date(now() + offset).toISOString();
-}
-
 // ============ Formatting ============
 
 /**
@@ -223,41 +216,9 @@ export function chromePromiseSingle<T>(
 // ============ Message Router ============
 
 export type { MessageType, ChromeMessage } from "../types/background";
-export { createMessageRouter, createAsyncHandler } from "./messageRouter";
-
-// ============ Debounce ============
-
-/**
- * Create a debounced function
- * @param fn Function to debounce
- * @param wait Wait time in milliseconds
- * @returns Debounced function
- */
-export function debounce<T extends (...args: unknown[]) => unknown>(
-  fn: T,
-  wait: number
-): (...args: Parameters<T>) => void {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-
-  return function (...args: Parameters<T>) {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-    timeout = setTimeout(() => {
-      fn(...args);
-      timeout = null;
-    }, wait);
-  };
-}
+export { createMessageRouter } from "./messageRouter";
 
 // ============ API Error Handling ============
 
-export type { RetryOptions, ErrorClassification } from "./apiErrorHandler";
-export {
-  withRetry,
-  isRetryableError,
-  classifyError,
-  handleApiError,
-  withApiErrorHandling,
-  calculateRetryDelay,
-} from "./apiErrorHandler";
+export type { ErrorClassification } from "./apiErrorHandler";
+export { isRetryableError, classifyError } from "./apiErrorHandler";

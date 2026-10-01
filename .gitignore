@@ -1,5 +1,8 @@
-.container-home
+.direnv
 node_modules
 dist
 .env
 Containerfile.dev
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

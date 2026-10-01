@@ -27,11 +27,3 @@ export interface SyncResult {
   skipped: number;
   errors: string[];
 }
-
-/**
- * Checksum computable item
- */
-export interface ChecksumItem {
-  name?: string;
-  url?: string;
-}

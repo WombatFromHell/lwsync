@@ -67,15 +67,6 @@ export function parseOrderToken(description: string): {
 }
 
 /**
- * Extract order token string from description
- * Returns null if no token found
- */
-export function extractOrderToken(description: string): string | null {
-  const result = parseOrderToken(description);
-  return result?.token || null;
-}
-
-/**
  * Remove order token from description
  * Preserves user content, removes token and extra whitespace
  */
@@ -138,48 +129,4 @@ export function getTokenInfo(
     hashValid,
     needsUpdate,
   };
-}
-
-/**
- * Ensure description has valid order token
- * Updates token if name changed, creates if missing
- */
-export function ensureOrderToken(
-  description: string,
-  name: string,
-  index: number
-): { description: string; tokenUpdated: boolean } {
-  const info = getTokenInfo(description, name);
-
-  if (!info?.hasToken) {
-    // No token - append new one
-    return {
-      description: appendOrderToken(description, name, index),
-      tokenUpdated: true,
-    };
-  }
-
-  if (info.needsUpdate) {
-    // Hash mismatch (rename) - update token
-    logger.info("Name changed, updating order token:", { name });
-    return {
-      description: appendOrderToken(description, name, index),
-      tokenUpdated: true,
-    };
-  }
-
-  // Token exists and is valid - check if index changed
-  if (info.index !== index) {
-    logger.debug("Order changed, updating token:", {
-      oldIndex: info.index,
-      newIndex: index,
-    });
-    return {
-      description: appendOrderToken(description, name, index),
-      tokenUpdated: true,
-    };
-  }
-
-  // Token is current - no change needed
-  return { description, tokenUpdated: false };
 }

@@ -3,13 +3,7 @@
  * Provides a Promise-based interface for chrome.bookmarks
  */
 
-import {
-  computeChecksum as computeStringChecksum,
-  generateId,
-  now,
-  chromePromise,
-  chromePromiseSingle,
-} from "./utils";
+import { chromePromise, chromePromiseSingle } from "./utils";
 import type { Mapping } from "./types/storage";
 import type { BookmarkNode } from "./types/bookmarks";
 import { detectBrowser } from "./browser";
@@ -72,13 +66,6 @@ export async function remove(id: string): Promise<void> {
 }
 
 /**
- * Remove a folder and all its contents
- */
-export async function removeTree(id: string): Promise<void> {
-  return chromePromise((cb) => chrome.bookmarks.removeTree(id, cb));
-}
-
-/**
  * Move a bookmark to a new location
  */
 export async function move(
@@ -116,7 +103,7 @@ export async function getOtherBookmarksFolder(): Promise<
  * Firefox: "toolbar_____" (Bookmarks Toolbar)
  * Chrome/Edge: "1" (Bookmarks Bar)
  */
-export function getBrowserRootFolderId(): string {
+function getBrowserRootFolderId(): string {
   const browser = detectBrowser();
 
   if (browser === "firefox") {
@@ -127,51 +114,44 @@ export function getBrowserRootFolderId(): string {
 }
 
 /**
- * Get the default browser root folder name
+ * Resolve the browser's root bookmark folder by inspecting the tree.
+ *
+ * Known IDs are not reliable: Chrome/Edge have re-assigned all bookmark
+ * IDs in some profiles (crbug 456225717), so "1"/"toolbar_____" may be
+ * missing or point at unrelated folders. Instead:
+ *   1. Prefer a tree-root child whose ID matches the expected one.
+ *   2. Otherwise take the first root child — the Bookmarks bar (Chromium)
+ *      and Bookmarks Toolbar (Firefox) are always at index 0.
  */
-export function getDefaultBrowserRootFolderName(): string {
-  const browser = detectBrowser();
+export async function getBrowserRootFolder(): Promise<BookmarkNode> {
+  const tree = await getTree();
+  const root = tree[0];
+  const children = root?.children ?? [];
 
-  if (browser === "firefox") {
-    return "Bookmarks Toolbar";
+  if (children.length === 0) {
+    throw new Error("Bookmark tree has no root folders");
   }
 
-  return "Bookmarks";
+  const expectedId = getBrowserRootFolderId();
+  const rootFolder =
+    children.find((c) => c.id === expectedId) ??
+    children.find((c) => c.index === 0) ??
+    children[0];
+
+  if (!isFolder(rootFolder)) {
+    throw new Error(
+      `Expected a folder at the bookmark root, got: "${rootFolder.title}"`
+    );
+  }
+
+  return rootFolder;
 }
 
 /**
  * Check if a node is a folder (no URL)
  */
-export function isFolder(node: BookmarkNode): boolean {
+function isFolder(node: BookmarkNode): boolean {
   return !node.url;
-}
-
-/**
- * Compute a checksum for a bookmark (for change detection)
- */
-export function computeChecksum(node: BookmarkNode): string {
-  const str = `${node.title || ""}|${node.url || ""}`;
-  return computeStringChecksum(str);
-}
-
-/**
- * Convert a BookmarkNode to a Mapping
- */
-export function nodeToMapping(
-  node: BookmarkNode,
-  linkwardenId: number,
-  type: "link" | "collection"
-): Mapping {
-  return {
-    id: generateId(),
-    linkwardenType: type,
-    linkwardenId,
-    browserId: node.id,
-    linkwardenUpdatedAt: now(),
-    browserUpdatedAt: node.dateGroupModified || node.dateAdded || now(),
-    lastSyncedAt: now(),
-    checksum: computeChecksum(node),
-  };
 }
 
 /**

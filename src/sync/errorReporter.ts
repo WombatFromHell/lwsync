@@ -127,12 +127,7 @@ export class SyncErrorReporter {
   /**
    * Convert to SyncResult format
    */
-  toSyncResult(stats: {
-    created: number;
-    updated: number;
-    deleted: number;
-    skipped: number;
-  }): SyncResult {
+  toSyncResult(stats: Omit<SyncResult, "errors">): SyncResult {
     return {
       ...stats,
       errors: this.getErrors(),

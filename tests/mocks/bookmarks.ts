@@ -304,13 +304,6 @@ export class MockBookmarks {
   }
 
   /**
-   * Remove a bookmark tree
-   */
-  removeTree(id: string, callback?: () => void): Promise<void> {
-    return this.remove(id, callback);
-  }
-
-  /**
    * Move a bookmark node to a new parent
    */
   move(
@@ -418,28 +411,6 @@ export class MockBookmarks {
   }
 
   /**
-   * Get recent bookmarks
-   */
-  getRecent(
-    numberOfItems: number,
-    callback?: (results: chrome.bookmarks.BookmarkTreeNode[]) => void
-  ): Promise<chrome.bookmarks.BookmarkTreeNode[]> {
-    const allNodes = Array.from(this.tree.values())
-      .filter((n) => n.url)
-      .sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0))
-      .slice(0, numberOfItems);
-
-    const result = allNodes.map((n) => this.toChromeNode(n));
-    const promise = Promise.resolve(result);
-
-    if (callback) {
-      promise.then((r) => setTimeout(() => callback(r), 0));
-    }
-
-    return promise;
-  }
-
-  /**
    * Search bookmarks
    */
   search(
@@ -461,39 +432,6 @@ export class MockBookmarks {
     }
 
     return promise;
-  }
-
-  /**
-   * Get all bookmarks (for testing)
-   */
-  getAll(): Map<string, MockBookmarkNode> {
-    return new Map(this.tree);
-  }
-
-  /**
-   * Set a node directly (for test setup)
-   */
-  setNode(id: string, node: Partial<MockBookmarkNode>): void {
-    const existing = this.tree.get(id);
-    this.tree.set(id, {
-      id,
-      parentId: node.parentId ?? existing?.parentId ?? "0",
-      title: node.title ?? existing?.title ?? "",
-      url: node.url ?? existing?.url,
-      children: node.children ?? existing?.children ?? [],
-      dateAdded: node.dateAdded ?? existing?.dateAdded ?? Date.now(),
-      dateGroupModified:
-        node.dateGroupModified ?? existing?.dateGroupModified ?? Date.now(),
-      index: node.index ?? existing?.index ?? 0,
-    });
-  }
-
-  /**
-   * Clear all bookmarks and reset to default structure
-   */
-  clear(): void {
-    this.tree.clear();
-    this.createDefaultStructure();
   }
 
   /**
@@ -525,69 +463,6 @@ export class MockBookmarks {
   }
 
   /**
-   * Reorder multiple bookmarks within the same parent folder
-   * Moves all bookmarks to their target indices efficiently
-   * Processes moves sequentially to avoid index conflicts
-   */
-  async reorderWithinFolder(
-    items: Array<{ id: string; targetIndex: number }>,
-    parentId: string
-  ): Promise<void> {
-    // Get current children order
-    const parent = this.tree.get(parentId);
-    if (!parent || !parent.children) return;
-
-    // Build the new order directly from target indices
-    // Create array of [targetIndex, id] pairs
-    const itemsWithIndex = items.map(
-      (item) => [item.targetIndex, item.id] as [number, string]
-    );
-
-    // Sort by target index
-    itemsWithIndex.sort((a, b) => a[0] - b[0]);
-
-    // Rebuild the children array in the correct order
-    const newChildren = itemsWithIndex.map(([_, id]) => id);
-
-    // Add any children that weren't in the reorder list (they stay at the end)
-    const reorderedIds = new Set(items.map((i) => i.id));
-    for (const childId of parent.children) {
-      if (!reorderedIds.has(childId)) {
-        newChildren.push(childId);
-      }
-    }
-
-    // Update parent's children
-    parent.children = newChildren;
-    parent.dateGroupModified = Date.now();
-    this.tree.set(parentId, parent);
-
-    // Update each node's index
-    for (let i = 0; i < parent.children.length; i++) {
-      const child = this.tree.get(parent.children[i]);
-      if (child) {
-        child.index = i;
-        this.tree.set(child.id, child);
-      }
-    }
-
-    // Fire events for all moved items
-    for (const item of items) {
-      const node = this.tree.get(item.id);
-      if (node) {
-        this.eventListeners.onMoved.forEach((cb) =>
-          cb(item.id, {
-            parentId: parentId || "0",
-            oldParentId: parentId || "0",
-            index: item.targetIndex,
-            oldIndex: node.index || 0,
-          })
-        );
-      }
-    }
-  }
-
-  /**
    * Convert to chrome.bookmarks API format
    */
   toChromeAPI(): typeof chrome.bookmarks {
@@ -599,7 +474,6 @@ export class MockBookmarks {
       remove: this.remove.bind(this),
       move: this.move.bind(this),
       getTree: this.getTree.bind(this),
-      getRecent: this.getRecent.bind(this),
       search: this.search.bind(this),
       onCreated: {
         addListener: (

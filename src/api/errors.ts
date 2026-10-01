@@ -19,19 +19,6 @@ export class APIError extends Error {
 }
 
 /**
- * Network error (connection issues, timeouts, etc.)
- */
-export class NetworkError extends APIError {
-  public readonly cause?: Error;
-
-  constructor(endpoint: string, cause?: Error) {
-    super(`Network error: ${endpoint}`, undefined, endpoint);
-    this.name = "NetworkError";
-    this.cause = cause;
-  }
-}
-
-/**
  * Authentication error (401 Unauthorized)
  */
 export class AuthError extends APIError {

@@ -72,12 +72,3 @@ export function setupBrowserMocks(): BrowserMocks {
 export function cleanupBrowserMocks(): void {
   delete (globalThis as Record<string, unknown>).chrome;
 }
-
-/**
- * Reset all mocks to initial state (call in beforeEach)
- */
-export function resetBrowserMocks(mocks: BrowserMocks): void {
-  mocks.storage.clearAll();
-  mocks.bookmarks.clear();
-  mocks.runtime.lastErrorInstance = undefined;
-}

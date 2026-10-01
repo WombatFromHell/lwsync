@@ -2,8 +2,6 @@
  * Browser detection and utilities
  */
 
-import { getEnvVarWithDefault } from "./utils";
-
 export type BrowserType = "firefox" | "chrome" | "edge" | "safari" | "unknown";
 
 /**
@@ -38,11 +36,4 @@ export function detectBrowser(): BrowserType {
  */
 export function getDefaultCollectionName(): string {
   return "Bookmarks";
-}
-
-/**
- * Get the target collection name from environment or default
- */
-export function getTargetCollectionNameFromEnv(): string {
-  return getEnvVarWithDefault("COLLECTION", "Bookmarks");
 }

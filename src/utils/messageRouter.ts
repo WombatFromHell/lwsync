@@ -76,20 +76,3 @@ export function createMessageRouter() {
     hasHandler,
   };
 }
-
-/**
- * Helper to create an async message handler with proper response handling
- * Wraps the handler to ensure it works with chrome.runtime.onMessage
- */
-export function createAsyncHandler<T extends MessageType>(
-  handler: MessageHandler<T>
-): (payload: MessageMap[T]) => Promise<unknown> {
-  return async (payload: MessageMap[T]) => {
-    try {
-      return await handler(payload);
-    } catch (error) {
-      logger.error(`Async handler error:`, error);
-      throw error;
-    }
-  };
-}
