@@ -259,9 +259,7 @@ test("should <action> when <condition>", async () => {
 ```typescript
 test("should do something", async () => {
   // Arrange: set up test data
-  await storage.saveSyncMetadata({
-    /* ... */
-  });
+  await storage.saveSyncMetadata({/* ... */});
 
   // Act: execute the code under test
   const result = await syncEngine.sync();

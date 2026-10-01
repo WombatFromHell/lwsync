@@ -16,7 +16,7 @@ flowchart TB
         Storage["chrome.storage<br/>(unlimitedStorage)"]
         Engine["SyncEngine<br/>(Orchestrator)"]
     end
-    
+
     subgraph Sync["Sync Modules"]
         Browser["BrowserChangeApplier<br/>Browser → Server"]
         Remote["RemoteSync<br/>Server → Browser"]
@@ -24,10 +24,10 @@ flowchart TB
         Links["CollectionLinkSync<br/>Link sync + order"]
         Comparator["SyncComparator<br/>Conflict Detection"]
     end
-    
+
     API["Linkwarden API<br/>/api/v1/*"]
     Bookmarks["chrome.bookmarks"]
-    
+
     UI <--> BG
     BG <--> Storage
     BG --> Engine
@@ -43,20 +43,20 @@ flowchart TB
 
 ### Module Responsibilities
 
-| Module | Responsibility | LOC |
-|--------|---------------|-----|
-| **SyncEngine** | Orchestrates sync cycle, coordinates modules | 434 |
+| Module                   | Responsibility                                                                 | LOC |
+| ------------------------ | ------------------------------------------------------------------------------ | --- |
+| **SyncEngine**           | Orchestrates sync cycle, coordinates modules                                   | 434 |
 | **BrowserChangeApplier** | Browser → Server (create, update, delete, move) + batch move/delete processing | 575 |
-| **RemoteSync** | Server → Browser (fetch tree, apply changes) | 298 |
-| **CollectionSync** | Collection sync, path helpers, move detection | 552 |
-| **CollectionLinkSync** | Link sync, order restoration, order-token push | 443 |
-| **SyncComparator** | Compare browser/server, detect conflicts | 719 |
-| **SyncInitializer** | First-time setup, collection creation | 239 |
-| **OrphanCleanup** | Remove deleted items from mappings | 251 |
-| **Moves** | Move token parsing/validation | 101 |
-| **Conflict** | Checksum + LWW resolution | 35 |
-| **ItemOrderToken** | Order token generation/parsing | 133 |
-| **ErrorReporter** | Cross-module error collection | 196 |
+| **RemoteSync**           | Server → Browser (fetch tree, apply changes)                                   | 298 |
+| **CollectionSync**       | Collection sync, path helpers, move detection                                  | 552 |
+| **CollectionLinkSync**   | Link sync, order restoration, order-token push                                 | 443 |
+| **SyncComparator**       | Compare browser/server, detect conflicts                                       | 719 |
+| **SyncInitializer**      | First-time setup, collection creation                                          | 239 |
+| **OrphanCleanup**        | Remove deleted items from mappings                                             | 251 |
+| **Moves**                | Move token parsing/validation                                                  | 101 |
+| **Conflict**             | Checksum + LWW resolution                                                      | 35  |
+| **ItemOrderToken**       | Order token generation/parsing                                                 | 133 |
+| **ErrorReporter**        | Cross-module error collection                                                  | 196 |
 
 ---
 
@@ -71,7 +71,7 @@ sequenceDiagram
     participant R as RemoteSync
     participant S as Storage
     participant A as Linkwarden API
-    
+
     E->>S: Load metadata (lastSyncTime, IDs)
     E->>S: Scan unmapped bookmarks
     E->>B: Process pending changes
@@ -89,10 +89,10 @@ sequenceDiagram
 
 ### 2.2 Change Detection
 
-| Direction | Mechanism | Trigger |
-|-----------|-----------|---------|
-| **Browser → Server** | Event listeners | `onCreated`, `onChanged`, `onRemoved`, `onMoved` |
-| **Server → Browser** | Polling (5 min default) | Compare `updatedAt` timestamps |
+| Direction            | Mechanism               | Trigger                                          |
+| -------------------- | ----------------------- | ------------------------------------------------ |
+| **Browser → Server** | Event listeners         | `onCreated`, `onChanged`, `onRemoved`, `onMoved` |
+| **Server → Browser** | Polling (5 min default) | Compare `updatedAt` timestamps                   |
 
 ### 2.3 Conflict Resolution
 
@@ -108,10 +108,15 @@ flowchart TD
 ```
 
 **LWW Implementation:**
+
 ```typescript
-function resolveConflict(local: Mapping, remote: LinkwardenLink): ConflictResult {
+function resolveConflict(
+  local: Mapping,
+  remote: LinkwardenLink
+): ConflictResult {
   if (local.checksum === computeChecksum(remote)) return "no-op";
-  if (new Date(remote.updatedAt).getTime() > local.browserUpdatedAt) return "use-remote";
+  if (new Date(remote.updatedAt).getTime() > local.browserUpdatedAt)
+    return "use-remote";
   return "use-local"; // Browser wins on tie
 }
 ```
@@ -132,9 +137,9 @@ interface Mapping {
   browserUpdatedAt: number;
   lastSyncedAt: number;
   checksum: string;
-  browserIndex?: number;      // Position in parent (order preservation)
-  cachedName?: string;        // For order token hash regeneration
-  cachedNameHash?: string;    // 8-char hash for order token
+  browserIndex?: number; // Position in parent (order preservation)
+  cachedName?: string; // For order token hash regeneration
+  cachedNameHash?: string; // 8-char hash for order token
 }
 
 interface PendingChange {
@@ -144,7 +149,7 @@ interface PendingChange {
   linkwardenId?: number;
   browserId?: string;
   parentId?: number | string;
-  index?: number;             // Position for reorder detection
+  index?: number; // Position for reorder detection
   oldParentId?: number | string;
   oldIndex?: number;
   data?: { url?: string; title?: string };
@@ -155,13 +160,13 @@ interface PendingChange {
 
 ### 3.2 Storage Schema
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `sync_metadata` | `SyncMetadata` | Last sync time, target IDs, sync direction |
-| `mappings` | `Mapping[]` | ID mapping table (O(1) lookups) |
-| `pending_changes` | `PendingChange[]` | Browser event queue |
-| `settings` | `Settings` | User configuration |
-| `sync_log` | `LogEntry[]` | Recent activity (max 100 entries) |
+| Key               | Type              | Description                                |
+| ----------------- | ----------------- | ------------------------------------------ |
+| `sync_metadata`   | `SyncMetadata`    | Last sync time, target IDs, sync direction |
+| `mappings`        | `Mapping[]`       | ID mapping table (O(1) lookups)            |
+| `pending_changes` | `PendingChange[]` | Browser event queue                        |
+| `settings`        | `Settings`        | User configuration                         |
+| `sync_log`        | `LogEntry[]`      | Recent activity (max 100 entries)          |
 
 ---
 
@@ -189,7 +194,7 @@ flowchart LR
         B3 --> B4[api.updateLinkOrder]
         B4 --> B5[Server updates description]
     end
-    
+
     subgraph Server["Server → Browser"]
         S1[Fetch links] --> S2[Parse order token]
         S2 --> S3[Update mapping.browserIndex]
@@ -200,6 +205,7 @@ flowchart LR
 ### 4.3 Order Restoration
 
 **Algorithm:**
+
 1. Capture current browser order → `browserIndex`
 2. Store in mapping table
 3. On sync: compare stored vs current
@@ -215,7 +221,7 @@ flowchart LR
 ```mermaid
 flowchart TD
     A[Sync Collection] --> B{Tier 1: Mapping lookup?}
-    B -->|Found| C[Use existing mapping O(1)]
+    B -->|Found| C["Use existing mapping O(1)"]
     B -->|Not found| D{Tier 2: Name match?}
     D -->|Found| E[Create mapping for existing]
     D -->|Not found| F{Tier 3: Path match?}
@@ -223,11 +229,11 @@ flowchart TD
     F -->|Not found| H[Create new item]
 ```
 
-| Tier | Strategy | Complexity | Hit Rate |
-|------|----------|------------|----------|
-| 1 | Mapping table lookup | O(1) | ~95% |
-| 2 | Name matching under parent | O(n) | ~4% |
-| 3 | Path-based matching | O(log n) | ~1% |
+| Tier | Strategy                   | Complexity | Hit Rate |
+| ---- | -------------------------- | ---------- | -------- |
+| 1    | Mapping table lookup       | O(1)       | ~95%     |
+| 2    | Name matching under parent | O(n)       | ~4%      |
+| 3    | Path-based matching        | O(log n)   | ~1%      |
 
 ---
 
@@ -235,10 +241,10 @@ flowchart TD
 
 ### 6.1 Bidirectional Move Tracking
 
-| Direction | Mechanism | Token |
-|-----------|-----------|-------|
+| Direction            | Mechanism                                       | Token                 |
+| -------------------- | ----------------------------------------------- | --------------------- |
 | **Browser → Server** | `onMoved` → append token → `updateCollection()` | `{LW:MOVE:{"to":id}}` |
-| **Server → Browser** | Detect `parentId` change → `bookmarks.move()` | N/A |
+| **Server → Browser** | Detect `parentId` change → `bookmarks.move()`   | N/A                   |
 
 ### 6.2 Move Validation
 
@@ -254,15 +260,15 @@ if (isCircular) throw new Error("Circular move detected");
 
 ### 7.1 Endpoints
 
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `GET` | `/collections` | List all collections |
-| `GET` | `/collections/:id/tree` | Get full hierarchy |
-| `PUT` | `/collections/:id` | Update collection |
-| `GET` | `/links?collectionId=:id` | Paginated links |
-| `PUT` | `/links/:id` | Update link |
-| `PUT` | `/links/:id/order` | Update order token |
-| `DELETE` | `/links/:id` | Delete link |
+| Method   | Endpoint                  | Purpose              |
+| -------- | ------------------------- | -------------------- |
+| `GET`    | `/collections`            | List all collections |
+| `GET`    | `/collections/:id/tree`   | Get full hierarchy   |
+| `PUT`    | `/collections/:id`        | Update collection    |
+| `GET`    | `/links?collectionId=:id` | Paginated links      |
+| `PUT`    | `/links/:id`              | Update link          |
+| `PUT`    | `/links/:id/order`        | Update order token   |
+| `DELETE` | `/links/:id`              | Delete link          |
 
 ### 7.2 Retry Strategy
 
@@ -281,21 +287,21 @@ flowchart TD
 **Retryable:** Network failures, 5xx, 429 (with `Retry-After`)
 **Non-retryable:** 4xx (except 429), 401, 404
 
-Retry lives inline in the API client (`src/api.ts`); `src/utils/apiErrorHandler.ts` handles error *classification* for user-facing messages.
+Retry lives inline in the API client (`src/api.ts`); `src/utils/apiErrorHandler.ts` handles error _classification_ for user-facing messages.
 
 ---
 
 ## 8. Tech Stack
 
-| Component | Technology | Version |
-|-----------|------------|---------|
-| **Extension** | Manifest V3 | Chrome, Firefox 128+, Edge |
-| **Language** | TypeScript | 5.x |
-| **Runtime** | Bun | 1.3.9 |
-| **UI** | Preact | 10.28.4 |
-| **Styling** | Tailwind CSS | 4.2.1 |
-| **Bundler** | Bun build | Native |
-| **Test Runner** | Bun test | `bun:test` |
+| Component       | Technology   | Version                    |
+| --------------- | ------------ | -------------------------- |
+| **Extension**   | Manifest V3  | Chrome, Firefox 128+, Edge |
+| **Language**    | TypeScript   | 5.x                        |
+| **Runtime**     | Bun          | 1.3.9                      |
+| **UI**          | Preact       | 10.28.4                    |
+| **Styling**     | Tailwind CSS | 4.2.1                      |
+| **Bundler**     | Bun build    | Native                     |
+| **Test Runner** | Bun test     | `bun:test`                 |
 
 ---
 
@@ -369,35 +375,35 @@ bun run verify        # Verify checksums
 
 ## 11. Key Design Decisions
 
-| # | Decision | Rationale |
-|---|----------|-----------|
-| 1 | `chrome.storage.local` + `unlimitedStorage` | Simpler than IndexedDB, no quota limits |
-| 2 | Mapping table = source of truth | O(1) lookups, never search after first sync |
-| 3 | Polling over Webhooks | Linkwarden lacks WebSocket API |
-| 4 | Folder-per-Collection | 1:1 mapping, tags not synced |
-| 5 | No content archival | URLs/titles only |
-| 6 | LWW conflict resolution | Simple, debuggable |
-| 7 | Server-side order tokens | Cross-device sync |
-| 8 | Grouped moves with individual API calls | Linkwarden has no batch move endpoint; grouping keeps calls deterministic |
-| 9 | Path-based fallback | Recovery when mappings lost |
-| 10 | Move tokens in description | Track moves without API support |
-| 11 | Error reporter pattern | Collect errors without failing sync |
-| 12 | Deterministic builds | Reproducible via container |
+| #   | Decision                                    | Rationale                                                                 |
+| --- | ------------------------------------------- | ------------------------------------------------------------------------- |
+| 1   | `chrome.storage.local` + `unlimitedStorage` | Simpler than IndexedDB, no quota limits                                   |
+| 2   | Mapping table = source of truth             | O(1) lookups, never search after first sync                               |
+| 3   | Polling over Webhooks                       | Linkwarden lacks WebSocket API                                            |
+| 4   | Folder-per-Collection                       | 1:1 mapping, tags not synced                                              |
+| 5   | No content archival                         | URLs/titles only                                                          |
+| 6   | LWW conflict resolution                     | Simple, debuggable                                                        |
+| 7   | Server-side order tokens                    | Cross-device sync                                                         |
+| 8   | Grouped moves with individual API calls     | Linkwarden has no batch move endpoint; grouping keeps calls deterministic |
+| 9   | Path-based fallback                         | Recovery when mappings lost                                               |
+| 10  | Move tokens in description                  | Track moves without API support                                           |
+| 11  | Error reporter pattern                      | Collect errors without failing sync                                       |
+| 12  | Deterministic builds                        | Reproducible via container                                                |
 
 ---
 
 ## 12. Risks & Mitigations
 
-| Risk | Mitigation |
-|------|------------|
-| **Clock skew** | Use server timestamps, 1s tolerance |
-| **Large collections** | Paginate requests, batch operations |
-| **Circular moves** | `isDescendantOf()` validation |
-| **Token expiration** | Handle 401, prompt refresh |
-| **Duplicate names** | Mapping-first, path fallback |
-| **Lost mappings** | Recovery utility rebuilds from hierarchy |
-| **API eventual consistency** | Wait 2.5s after creation |
-| **Order token corruption** | Hash validation, auto-regenerate |
+| Risk                         | Mitigation                               |
+| ---------------------------- | ---------------------------------------- |
+| **Clock skew**               | Use server timestamps, 1s tolerance      |
+| **Large collections**        | Paginate requests, batch operations      |
+| **Circular moves**           | `isDescendantOf()` validation            |
+| **Token expiration**         | Handle 401, prompt refresh               |
+| **Duplicate names**          | Mapping-first, path fallback             |
+| **Lost mappings**            | Recovery utility rebuilds from hierarchy |
+| **API eventual consistency** | Wait 2.5s after creation                 |
+| **Order token corruption**   | Hash validation, auto-regenerate         |
 
 ---
 
@@ -411,22 +417,22 @@ flowchart TD
         E1["smoke.test.ts - 8 tests"]
         E2["e2e-advanced.test.ts - 7 tests"]
     end
-    
+
     subgraph Unit["Unit (72 tests)"]
         U1["sync.test.ts - 38 tests"]
         U2["item-order-token.test.ts - 31 tests"]
         U3["bookmarks.test.ts - 3 tests"]
     end
-    
+
     E2 --> E1
     U2 --> U1
 ```
 
 ### Test Infrastructure
 
-| Module | Purpose |
-|--------|---------|
-| **Mocks** | `MockStorage`, `MockBookmarks`, `MockLinkwardenAPI` |
+| Module        | Purpose                                                             |
+| ------------- | ------------------------------------------------------------------- |
+| **Mocks**     | `MockStorage`, `MockBookmarks`, `MockLinkwardenAPI`                 |
 | **Utilities** | `uniqueId()`, `uniqueUrl()`, `timestamp()`, server resource cleanup |
 
 Test data helpers (e.g. `createMapping()`) live inline in the test files that use them.
@@ -438,10 +444,12 @@ Test data helpers (e.g. `createMapping()`) live inline in the test files that us
 ## 14. Loading the Extension
 
 **Chrome/Edge:**
+
 1. `chrome://extensions/` → Developer mode
 2. Load unpacked → `dist/chrome/`
 
 **Firefox:**
+
 1. `about:debugging` → Load Temporary Add-on
 2. Select `dist/firefox/manifest.json`
 
@@ -449,21 +457,21 @@ Test data helpers (e.g. `createMapping()`) live inline in the test files that us
 
 ## 15. Implementation Status
 
-| Phase | Feature | Status |
-|-------|---------|--------|
-| 1 | Foundation (manifest, storage, API) | ✅ |
-| 2 | One-way sync (Server → Browser) | ✅ |
-| 3 | Bidirectional sync + conflicts | ✅ |
-| 4 | Polish (error handling, deduplication) | ✅ |
-| 5 | Deterministic builds | ✅ |
-| 6 | Firefox MV3 migration | ✅ |
-| 7 | UI + Tailwind CSS v4 | ✅ |
-| 8 | Test suite consolidation | ✅ |
-| 9 | Bookmark order preservation | ✅ |
-| 10 | Optimized fetch + API compliance | ✅ |
-| 11 | Server-side order tokens | ✅ |
-| 12 | Code consolidation (-3 modules) | ✅ |
-| 13 | Dead-code removal (src −18.5%, tests −32%) | ✅ |
+| Phase | Feature                                    | Status |
+| ----- | ------------------------------------------ | ------ |
+| 1     | Foundation (manifest, storage, API)        | ✅     |
+| 2     | One-way sync (Server → Browser)            | ✅     |
+| 3     | Bidirectional sync + conflicts             | ✅     |
+| 4     | Polish (error handling, deduplication)     | ✅     |
+| 5     | Deterministic builds                       | ✅     |
+| 6     | Firefox MV3 migration                      | ✅     |
+| 7     | UI + Tailwind CSS v4                       | ✅     |
+| 8     | Test suite consolidation                   | ✅     |
+| 9     | Bookmark order preservation                | ✅     |
+| 10    | Optimized fetch + API compliance           | ✅     |
+| 11    | Server-side order tokens                   | ✅     |
+| 12    | Code consolidation (-3 modules)            | ✅     |
+| 13    | Dead-code removal (src −18.5%, tests −32%) | ✅     |
 
 ---
 

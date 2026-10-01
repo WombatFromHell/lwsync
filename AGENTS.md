@@ -2,13 +2,13 @@
 
 ## Tools & Dependencies
 
-| Tool | Purpose | Version |
-|------|---------|---------|
-| **Bun** | Runtime, bundler, test runner, package manager | 1.3.9 |
-| **TypeScript** | Type-safe JavaScript | 5.x |
-| **Prettier** | Code formatting | 3.8.1 |
-| **ESLint** | Code linting | 10.x |
-| **Tailwind CSS** | Utility-first CSS | 4.2.1 |
+| Tool             | Purpose                                        | Version |
+| ---------------- | ---------------------------------------------- | ------- |
+| **Bun**          | Runtime, bundler, test runner, package manager | 1.3.9   |
+| **TypeScript**   | Type-safe JavaScript                           | 5.x     |
+| **Prettier**     | Code formatting                                | 3.8.1   |
+| **ESLint**       | Code linting                                   | 10.x    |
+| **Tailwind CSS** | Utility-first CSS                              | 4.2.1   |
 
 ## Commands
 
@@ -71,20 +71,23 @@ tests/
 ## Testing
 
 **Test Files:**
-| File | Tests | Description |
-|------|-------|-------------|
-| `tests/sync.test.ts` | 38 | Sync engine (checksums, conflicts, move tokens, paths) |
-| `tests/item-order-token.test.ts` | 31 | Order token utilities (hash generation, parsing) |
-| `tests/bookmarks.test.ts` | 3 | Bookmarks wrapper |
-| `tests/smoke.test.ts` | 8 | E2E tests with real Linkwarden API |
-| `tests/e2e-advanced.test.ts` | 7 | Advanced E2E scenarios (conflicts, order preservation) |
+
+| File                             | Tests | Description                                            |
+| -------------------------------- | ----- | ------------------------------------------------------ |
+| `tests/sync.test.ts`             | 38    | Sync engine (checksums, conflicts, move tokens, paths) |
+| `tests/item-order-token.test.ts` | 31    | Order token utilities (hash generation, parsing)       |
+| `tests/bookmarks.test.ts`        | 3     | Bookmarks wrapper                                      |
+| `tests/smoke.test.ts`            | 8     | E2E tests with real Linkwarden API                     |
+| `tests/e2e-advanced.test.ts`     | 7     | Advanced E2E scenarios (conflicts, order preservation) |
 
 **Test Infrastructure:**
+
 - **Factories** (`tests/fixtures/`): `createMapping()`, `createLink()`, `createCollection()`, etc.
 - **Mocks** (`tests/mocks/`): `MockStorage`, `MockBookmarks`, `MockLinkwardenAPI`
 - **Utilities** (`tests/utils/`): `uniqueId()`, `uniqueUrl()`, `timestamp()`
 
 **Example Test:**
+
 ```typescript
 import { setupBrowserMocks, cleanupBrowserMocks } from "./mocks/browser";
 import { MockLinkwardenAPI } from "./mocks/linkwarden";
@@ -105,7 +108,7 @@ afterEach(() => {
 test("should create mapping", async () => {
   const mapping = createMapping({ linkwardenId: 1, browserId: "bookmark-1" });
   await storage.upsertMapping(mapping);
-  
+
   const mappings = await storage.getMappings();
   expect(mappings.length).toBe(1);
 });
@@ -118,17 +121,20 @@ test("should create mapping", async () => {
 ## Loading the Extension
 
 **Chrome/Edge:**
+
 1. Go to `chrome://extensions/`
 2. Enable "Developer mode"
 3. Click "Load unpacked"
 4. Select `dist/chrome/` folder
 
 **Firefox:**
+
 1. Go to `about:debugging`
 2. Click "Load Temporary Add-on"
 3. Select `dist/firefox/manifest.json`
 
 <!-- graft:start -->
+
 ## Graft — repo context graph
 
 This repo is indexed in `graft/`: small linked markdown nodes that explain each
